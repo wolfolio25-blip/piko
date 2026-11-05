@@ -55,7 +55,7 @@ public final class BookmarkTabs {
             @Override public void onActivityPaused(Activity a) {}
             @Override public void onActivityStopped(Activity a) {}
             @Override public void onActivitySaveInstanceState(Activity a, Bundle s) {}
-            @Override public void onActivityDestroyed(Activity a) {}
+            @Override public void onActivityDestroyed(Activity a) { INSTALLED.remove(a); }
         });
     }
 
@@ -97,17 +97,17 @@ public final class BookmarkTabs {
         // Only wrap the native Bookmarks content once per Activity instance.
         if (INSTALLED.containsKey(activity)) return;
         if (content.getChildCount() == 0) return;
+        ArrayList<View> nativeChildren = new ArrayList<>();
+        ArrayList<ViewGroup.LayoutParams> params = new ArrayList<>();
+        for (int i = 0; i < content.getChildCount(); i++) {
+            View child = content.getChildAt(i);
+            nativeChildren.add(child);
+            params.add(child.getLayoutParams());
+        }
         try {
-            ArrayList<View> nativeChildren = new ArrayList<>();
-            ArrayList<ViewGroup.LayoutParams> params = new ArrayList<>();
-            for (int i = 0; i < content.getChildCount(); i++) {
-                View child = content.getChildAt(i);
-                nativeChildren.add(child);
-                params.add(child.getLayoutParams());
-            }
-            content.removeAllViews();
-
+            // Prepare UI first; if this fails, leave X's original screen untouched.
             BookmarkPage page = new BookmarkPage(activity);
+            content.removeAllViews();
             content.addView(page.shell, fullFrame());
             for (int i = 0; i < nativeChildren.size(); i++) {
                 View child = nativeChildren.get(i);
@@ -123,7 +123,18 @@ public final class BookmarkTabs {
             INSTALLED.put(activity, page);
             page.switchTo(false);
         } catch (Exception exception) {
-            // Do not crash X if a vendor-specific bookmark layout changes.
+            // Restore the original children if a vendor-specific layout rejects wrapping.
+            content.removeAllViews();
+            for (int i = 0; i < nativeChildren.size(); i++) {
+                View child = nativeChildren.get(i);
+                if (child.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) child.getParent()).removeView(child);
+                }
+                ViewGroup.LayoutParams original = params.get(i);
+                content.addView(child, original instanceof FrameLayout.LayoutParams
+                        ? (FrameLayout.LayoutParams) original : fullFrame());
+            }
+            INSTALLED.remove(activity);
             android.util.Log.e("PikoBookmarkTabs", "Could not attach tabs", exception);
         }
     }
