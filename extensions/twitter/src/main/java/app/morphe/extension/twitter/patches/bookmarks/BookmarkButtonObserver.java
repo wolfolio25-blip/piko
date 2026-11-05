@@ -167,7 +167,9 @@ public final class BookmarkButtonObserver {
                 final String labelBeforeClick = previousLabel;
                 CharSequence current = host.getContentDescription();
                 previousLabel = current == null ? "" : current.toString();
-                host.post(() -> onBookmarkClicked(host, labelBeforeClick));
+                // Capture the tweet while the clicked view is still bound to its row.
+                final Tweet tweetAtClick = findTweet(host);
+                host.post(() -> onBookmarkClicked(host, labelBeforeClick, tweetAtClick));
             }
         }
 
@@ -215,7 +217,7 @@ public final class BookmarkButtonObserver {
         }
     }
 
-    private static void onBookmarkClicked(View clicked, String previousLabel) {
+    private static void onBookmarkClicked(View clicked, String previousLabel, Tweet tweetAtClick) {
         Context ctx = clicked.getContext();
         Activity activity = findActivity(ctx);
         if (activity == null || activity.isFinishing() || activity.isDestroyed()) return;
@@ -225,7 +227,7 @@ public final class BookmarkButtonObserver {
         if (description.contains("remove") || description.contains("delete")
                 || description.contains("bookmarked")) return;
 
-        Tweet tweet = findTweet(clicked);
+        Tweet tweet = tweetAtClick != null ? tweetAtClick : findTweet(clicked);
         if (tweet == null) {
             // Never save a guessed ID to the wrong folder.
             android.util.Log.w(TAG, "Couldn't resolve tweet model from inline bookmark control");
