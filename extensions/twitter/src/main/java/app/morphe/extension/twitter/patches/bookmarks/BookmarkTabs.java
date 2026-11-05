@@ -36,6 +36,8 @@ public final class BookmarkTabs {
     private static final int DARK_TEXT = 0xFFE7E9EA;
     private static final int LIGHT_TEXT = 0xFF0F1419;
     private static boolean registered;
+    private static final java.util.WeakHashMap<Activity, BookmarkPage> INSTALLED =
+            new java.util.WeakHashMap<>();
 
     private BookmarkTabs() {}
 
@@ -93,7 +95,7 @@ public final class BookmarkTabs {
         if (!(root instanceof FrameLayout)) return;
         FrameLayout content = (FrameLayout) root;
         // Only wrap the native Bookmarks content once per Activity instance.
-        if (content.getTag() instanceof BookmarkPage) return;
+        if (INSTALLED.containsKey(activity)) return;
         if (content.getChildCount() == 0) return;
         try {
             ArrayList<View> nativeChildren = new ArrayList<>();
@@ -118,10 +120,10 @@ public final class BookmarkTabs {
                 }
                 page.originalView.addView(child, frameParams);
             }
-            content.setTag(page);
+            INSTALLED.put(activity, page);
             page.switchTo(false);
         } catch (Exception exception) {
-            // A failed tab insertion should never blank the X bookmark screen.
+            // Do not crash X if a vendor-specific bookmark layout changes.
             android.util.Log.e("PikoBookmarkTabs", "Could not attach tabs", exception);
         }
     }
