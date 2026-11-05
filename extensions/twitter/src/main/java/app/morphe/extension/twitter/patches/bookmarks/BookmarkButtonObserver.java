@@ -261,22 +261,35 @@ public final class BookmarkButtonObserver {
         for (int i = 0; current != null && i < 12; i++) {
             // Never scan an entire list adapter: it can contain many unrelated posts.
             if (current instanceof android.widget.AbsListView) break;
-            boolean wholeList = false;
-            for (Class<?> type = current.getClass(); type != null; type = type.getSuperclass()) {
-                if ("androidx.recyclerview.widget.RecyclerView".equals(type.getName())) {
-                    wholeList = true;
-                    break;
-                }
-            }
-            if (wholeList) break;
+            if (isRecyclerView(current)) break;
             Tweet fromTag = probe(current.getTag(), seen, budget, 0);
             if (fromTag != null) return fromTag;
             Tweet fromView = probe(current, seen, budget, 0);
             if (fromView != null) return fromView;
             ViewParent parent = current.getParent();
+            if (parent instanceof View && isRecyclerView((View) parent)) {
+                // RecyclerView stores each row's model in its ViewHolder. Fetch
+                // ONLY the holder of the row that contains the clicked bookmark.
+                // This is safer and more reliable than probing an entire adapter.
+                try {
+                    java.lang.reflect.Method getHolder = parent.getClass()
+                            .getMethod("getChildViewHolder", View.class);
+                    Object holder = getHolder.invoke(parent, current);
+                    Tweet fromHolder = probe(holder, seen, budget, 0);
+                    if (fromHolder != null) return fromHolder;
+                } catch (Exception ignored) {}
+                break;
+            }
             current = parent instanceof View ? (View) parent : null;
         }
         return null;
+    }
+
+    private static boolean isRecyclerView(View view) {
+        for (Class<?> type = view.getClass(); type != null; type = type.getSuperclass()) {
+            if ("androidx.recyclerview.widget.RecyclerView".equals(type.getName())) return true;
+        }
+        return false;
     }
 
     private static Tweet probe(Object obj, Set<Object> seen, int[] budget, int depth) {
