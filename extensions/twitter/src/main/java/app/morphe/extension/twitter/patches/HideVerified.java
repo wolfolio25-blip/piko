@@ -1,4 +1,4 @@
-/*
+ /*
  * Copyright (C) 2026 piko <https://github.com/crimera/piko>
  *
  * See the included NOTICE file for GPLv3 §7(b) terms that apply to this code.
@@ -15,28 +15,31 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 
 /**
- * Hides tweets and replies from verified accounts (blue check / X Premium,
- * including a hidden checkmark, plus gold/grey org and legacy verified), as well
- * as tweets that retweet or quote-tweet a verified account, and replies TO a
- * verified account (even when the replier is not verified).
+ * Hides posts authored by verified accounts UNLESS the viewer follows them.
  *
- * It works on the raw JSON server response, hooked at the same Jackson
- * createParser(InputStream) point as "Log server response", BEFORE the app parses
- * it into its obfuscated model. That makes it independent of per-version obfuscation
- * and covers the home timeline, profiles, conversations/replies, and search alike.
+ * Keeps ordinary replies and quote-posts from unverified authors visible.
+ * Reposts of hidden verified posts are hidden as well.
  *
- * Fail-safe by construction: if anything is unexpected the original bytes are
- * returned untouched, so a response is never corrupted.
+ * X does not include the viewer's follow relationship in every response.
+ * We therefore remember verified accounts confirmed as followed when their
+ * relationship data does appear. If a relationship is never supplied, the
+ * account cannot reliably be recognized as followed and may still be hidden.
+ *
+ * Processes raw JSON server responses before X parses them.
  */
 public final class HideVerified {
 
-    /** Wraps the response stream, filtering timeline JSON in place. */
+    private static final Set<String> followedVerifiedIds =
+            Collections.synchronizedSet(new HashSet<String>());
+
+    /** Wrap the JSON response stream without changing responses on failure. */
     public static InputStream filter(InputStream in) {
         if (in == null) return null;
         byte[] raw;
@@ -44,222 +47,270 @@ public final class HideVerified {
             raw = readAll(in);
             in.close();
         } catch (Throwable t) {
-            // Could not buffer the stream; hand back the original (nothing better available).
             return in;
         }
+
         try {
             String json = new String(raw, StandardCharsets.UTF_8);
-            // Cheap gate: only pay for parsing when a verified flag is present.
-            if (json.indexOf("is_blue_verified") < 0
-                    && json.indexOf("verified_type") < 0
-                    && json.indexOf("\"verified\"") < 0) {
+            if (!json.contains("is_blue_verified")
+                    && !json.contains("ext_is_blue_verified")
+                    && !json.contains("\"verified_type\"")
+                    && !json.contains("\"verification\"")
+                    && !json.contains("\"verified\"")) {
                 return new ByteArrayInputStream(raw);
             }
             String filtered = filterJson(json);
-            if (filtered == null || filtered == json) return new ByteArrayInputStream(raw);
+            if (filtered == json) return new ByteArrayInputStream(raw);
             return new ByteArrayInputStream(filtered.getBytes(StandardCharsets.UTF_8));
         } catch (Throwable t) {
-            // Never break the app: hand back the original bytes, re-readable.
             return new ByteArrayInputStream(raw);
         }
     }
 
-    /** Returns filtered JSON, or the same string reference if nothing changed. */
+    /** Return the original text when nothing was filtered or parsing fails. */
     static String filterJson(String input) {
         try {
             Object root = new JSONTokener(input).nextValue();
-            // First pass: every verified user's id, so replies TO them can be matched.
-            Set<String> verifiedIds = new HashSet<>();
-            collectVerifiedIds(root, verifiedIds);
-            int removed = walk(root, verifiedIds);
-            if (removed <= 0) return input;
-            String out = root.toString();   // Android JSONObject.toString() can return null on internal error
-            return out != null ? out : input;
+
+            // Read follow relationships BEFORE deleting timeline entries.
+            Set<String> positivelyFollowed = new HashSet<>();
+            Set<String> explicitlyNotFollowed = new HashSet<>();
+            collectRelationships(root, positivelyFollowed, explicitlyNotFollowed);
+            synchronized (followedVerifiedIds) {
+                for (String id : explicitlyNotFollowed) {
+                    if (!positivelyFollowed.contains(id)) followedVerifiedIds.remove(id);
+                }
+                followedVerifiedIds.addAll(positivelyFollowed);
+            }
+
+            int removed = walk(root);
+            if (removed == 0) return input;
+            String output = root.toString();
+            return output != null ? output : input;
         } catch (Throwable t) {
             return input;
         }
     }
 
-    private static void collectVerifiedIds(Object node, Set<String> ids) {
+    /** Learn which verified users the viewer currently follows. */
+    private static void collectRelationships(Object node,
+                                             Set<String> followed,
+                                             Set<String> notFollowed) {
         if (node instanceof JSONObject) {
-            JSONObject o = (JSONObject) node;
-            if (userVerified(o)) {
-                String id = o.optString("rest_id", "");
-                if (!id.isEmpty()) ids.add(id);
+            JSONObject obj = (JSONObject) node;
+            if (userVerified(obj)) {
+                String id = userId(obj);
+                Boolean following = followingStatus(obj);
+                if (!id.isEmpty() && following != null) {
+                    if (following) followed.add(id);
+                    else notFollowed.add(id);
+                }
             }
-            Iterator<String> it = o.keys();
-            while (it.hasNext()) collectVerifiedIds(o.opt(it.next()), ids);
+            Iterator<String> keys = obj.keys();
+            while (keys.hasNext()) {
+                collectRelationships(obj.opt(keys.next()), followed, notFollowed);
+            }
         } else if (node instanceof JSONArray) {
-            JSONArray a = (JSONArray) node;
-            for (int i = 0; i < a.length(); i++) collectVerifiedIds(a.opt(i), ids);
+            JSONArray arr = (JSONArray) node;
+            for (int i = 0; i < arr.length(); i++) {
+                collectRelationships(arr.opt(i), followed, notFollowed);
+            }
         }
     }
 
-    private static int walk(Object node, Set<String> ids) {
+    private static int walk(Object node) {
         int removed = 0;
         if (node instanceof JSONObject) {
-            JSONObject o = (JSONObject) node;
+            JSONObject obj = (JSONObject) node;
             List<String> keys = new ArrayList<>();
-            Iterator<String> it = o.keys();   // Android org.json exposes keys(), not keySet()
+            Iterator<String> it = obj.keys();
             while (it.hasNext()) keys.add(it.next());
-            for (String k : keys) {
-                Object v = o.opt(k);
-                if ("instructions".equals(k) && v instanceof JSONArray) {
-                    // Singular pinned/replaced entries and module pagination live here,
-                    // not inside an "entries" array.
-                    removed += filterInstructions((JSONArray) v, ids);
-                } else if ("entries".equals(k) && v instanceof JSONArray) {
-                    removed += filterEntries((JSONArray) v, ids);
+
+            for (String key : keys) {
+                Object value = obj.opt(key);
+                if ("instructions".equals(key) && value instanceof JSONArray) {
+                    removed += filterInstructions((JSONArray) value);
+                } else if ("entries".equals(key) && value instanceof JSONArray) {
+                    removed += filterEntries((JSONArray) value);
                 }
-                removed += walk(v, ids);
+                removed += walk(value);
             }
         } else if (node instanceof JSONArray) {
-            JSONArray a = (JSONArray) node;
-            for (int i = 0; i < a.length(); i++) removed += walk(a.opt(i), ids);
+            JSONArray arr = (JSONArray) node;
+            for (int i = 0; i < arr.length(); i++) removed += walk(arr.opt(i));
         }
         return removed;
     }
 
-    // TimelinePinEntry / TimelineReplaceEntry carry a single "entry"; TimelineAddToModule
-    // carries "moduleItems". "entries" arrays inside instructions are handled by walk().
-    private static int filterInstructions(JSONArray instructions, Set<String> ids) {
+    private static int filterInstructions(JSONArray instructions) {
         int removed = 0;
         for (int i = instructions.length() - 1; i >= 0; i--) {
             JSONObject instr = instructions.optJSONObject(i);
             if (instr == null) continue;
+
             JSONObject entry = instr.optJSONObject("entry");
-            if (entry != null && entryHidden(entry, ids)) {
+            if (entry != null && entryHidden(entry)) {
                 instructions.remove(i);
                 removed++;
                 continue;
             }
             JSONArray moduleItems = instr.optJSONArray("moduleItems");
-            if (moduleItems != null) removed += filterItems(moduleItems, ids);
+            if (moduleItems != null) removed += filterItems(moduleItems);
         }
         return removed;
     }
 
-    private static int filterEntries(JSONArray entries, Set<String> ids) {
+    private static int filterEntries(JSONArray entries) {
         int removed = 0;
         for (int i = entries.length() - 1; i >= 0; i--) {
             JSONObject entry = entries.optJSONObject(i);
             if (entry == null) continue;
 
-            // A single tweet entry (content.content on current X, content.itemContent on older).
-            if (entryHidden(entry, ids)) {
+            if (entryHidden(entry)) {
                 entries.remove(i);
                 removed++;
                 continue;
             }
 
-            // A module of items (conversations, carousels): items[].item.content|itemContent.
             JSONObject content = entry.optJSONObject("content");
             JSONArray items = content == null ? null : content.optJSONArray("items");
             if (items != null) {
-                int r = filterItems(items, ids);
-                removed += r;
-                // Only drop the module if WE emptied it, not if the server sent it empty.
-                if (r > 0 && items.length() == 0) entries.remove(i);
+                int count = filterItems(items);
+                removed += count;
+                if (count > 0 && items.length() == 0) entries.remove(i);
             }
         }
         return removed;
     }
 
-    /** Removes hidden items from an items[]/moduleItems[] array. */
-    private static int filterItems(JSONArray items, Set<String> ids) {
+    private static int filterItems(JSONArray items) {
         int removed = 0;
-        for (int j = items.length() - 1; j >= 0; j--) {
-            JSONObject moduleItem = items.optJSONObject(j);
-            JSONObject item = moduleItem == null ? null : moduleItem.optJSONObject("item");
-            JSONObject ic = item == null ? null : firstObject(item, "content", "itemContent");
-            if (ic != null && itemHidden(ic, ids)) {
-                items.remove(j);
+        for (int i = items.length() - 1; i >= 0; i--) {
+            JSONObject module = items.optJSONObject(i);
+            JSONObject item = module == null ? null : module.optJSONObject("item");
+            JSONObject content = item == null ? null : firstObject(item, "content", "itemContent");
+            if (content != null && itemHidden(content)) {
+                items.remove(i);
                 removed++;
             }
         }
         return removed;
     }
 
-    /** True if the single tweet in this entry should be hidden. */
-    private static boolean entryHidden(JSONObject entry, Set<String> ids) {
+    private static boolean entryHidden(JSONObject entry) {
         JSONObject content = entry.optJSONObject("content");
         if (content == null) return false;
-        JSONObject itemContent = firstObject(content, "content", "itemContent");
-        return itemContent != null && itemHidden(itemContent, ids);
+        JSONObject inner = firstObject(content, "content", "itemContent");
+        if (inner == null) inner = content;
+        return itemHidden(inner);
     }
 
-    private static boolean itemHidden(JSONObject itemContent, Set<String> ids) {
-        // Current X calls this tweetResult; older builds used tweet_results.
+    private static boolean itemHidden(JSONObject itemContent) {
         JSONObject tweetResult = firstObject(itemContent, "tweetResult", "tweet_results");
-        return tweetResult != null && shouldHide(tweetResult.optJSONObject("result"), ids, 0);
+        return tweetResult != null && shouldHide(tweetResult.optJSONObject("result"), 0);
     }
 
-    // A tweet is hidden if it is FROM a verified account, REPLIES TO one, or RETWEETS /
-    // QUOTES one (recursively, so a retweet of a quote of a verified account is caught too).
-    private static boolean shouldHide(JSONObject result, Set<String> ids, int depth) {
+    /** Only the tweet author (and the original author of a repost) matters. */
+    private static boolean shouldHide(JSONObject result, int depth) {
         if (result == null || depth > 4) return false;
-        if (result.has("tweet")) {
-            JSONObject inner = result.optJSONObject("tweet");
-            if (inner != null) result = inner;
+        JSONObject innerTweet = result.optJSONObject("tweet");
+        if (innerTweet != null) result = innerTweet;
+
+        JSONObject author = authorOf(result);
+        if (userVerified(author)) {
+            // Keep every post from verified accounts confirmed as followed.
+            if (userFollowed(author)) return false;
+            return true;
         }
-        // The tweet's own author.
-        if (userVerified(authorOf(result))) return true;
+
+        // Hide reposts of non-followed verified accounts, but do NOT hide
+        // unrelated replies or quotes authored by unverified accounts.
         JSONObject legacy = result.optJSONObject("legacy");
-        if (legacy != null) {
-            // A reply to a verified account (the replier itself may be unverified).
-            String replyTo = legacy.optString("in_reply_to_user_id_str", "");
-            if (!replyTo.isEmpty() && ids.contains(replyTo)) return true;
-            // A retweet of a hidden tweet.
-            JSONObject rt = legacy.optJSONObject("retweeted_status_result");
-            if (rt != null && shouldHide(rt.optJSONObject("result"), ids, depth + 1)) return true;
-        }
-        // A quote of a hidden tweet.
-        JSONObject quoted = result.optJSONObject("quoted_status_result");
-        if (quoted != null && shouldHide(quoted.optJSONObject("result"), ids, depth + 1)) return true;
-        return false;
+        JSONObject repost = legacy == null ? null : legacy.optJSONObject("retweeted_status_result");
+        if (repost == null) repost = result.optJSONObject("retweeted_status_result");
+        return repost != null && shouldHide(repost.optJSONObject("result"), depth + 1);
     }
 
-    /** result.core.user_result.result (current X) or result.core.user_results.result (older). */
+    /** Current and older X GraphQL user-result shapes. */
     private static JSONObject authorOf(JSONObject result) {
-        if (result == null) return null;
-        JSONObject core = result.optJSONObject("core");
-        if (core == null) return null;
+        JSONObject core = result == null ? null : result.optJSONObject("core");
         JSONObject userResults = firstObject(core, "user_result", "user_results");
-        if (userResults == null) return null;
-        return userResults.optJSONObject("result");
+        return userResults == null ? null : userResults.optJSONObject("result");
     }
 
-    /** First present child object among the given keys, or null. */
-    private static JSONObject firstObject(JSONObject o, String... keys) {
-        if (o == null) return null;
-        for (String k : keys) {
-            JSONObject v = o.optJSONObject(k);
-            if (v != null) return v;
+    private static JSONObject firstObject(JSONObject obj, String... keys) {
+        if (obj == null) return null;
+        for (String key : keys) {
+            JSONObject child = obj.optJSONObject(key);
+            if (child != null) return child;
         }
         return null;
     }
 
+    /** The API supplies this only in some user/profile responses. */
+    private static Boolean followingStatus(JSONObject user) {
+        if (user == null) return null;
+        JSONObject perspectives = user.optJSONObject("relationship_perspectives");
+        if (perspectives != null && perspectives.has("following")
+                && !perspectives.isNull("following")) {
+            return perspectives.optBoolean("following", false);
+        }
+        JSONObject legacy = user.optJSONObject("legacy");
+        if (legacy != null && legacy.has("following")
+                && !legacy.isNull("following")) {
+            return legacy.optBoolean("following", false);
+        }
+        return null;
+    }
+
+    private static boolean userFollowed(JSONObject user) {
+        Boolean status = followingStatus(user);
+        if (status != null) return status;
+        String id = userId(user);
+        return !id.isEmpty() && followedVerifiedIds.contains(id);
+    }
+
+    private static String userId(JSONObject user) {
+        if (user == null) return "";
+        String id = user.optString("rest_id", "");
+        if (!id.isEmpty()) return id;
+        JSONObject legacy = user.optJSONObject("legacy");
+        if (legacy != null) {
+            id = legacy.optString("id_str", "");
+            if (!id.isEmpty()) return id;
+        }
+        return user.optString("id_str", "");
+    }
+
     private static boolean userVerified(JSONObject user) {
         if (user == null) return false;
-        // is_blue_verified stays true in the API even when the badge is hidden in-UI.
-        // ext_is_blue_verified is the same signal on the older REST user shape.
-        if (user.optBoolean("is_blue_verified", false)) return true;
-        if (user.optBoolean("ext_is_blue_verified", false)) return true;
-        // Android org.json's optString turns an explicit JSON null into the string "null";
-        // guard with isNull so an unset verified_type is not misread as a Business/Gov badge.
-        if (!user.isNull("verified_type")) {
-            String vt = user.optString("verified_type", "");
-            if (vt.length() > 0 && !vt.equalsIgnoreCase("None") && !vt.equalsIgnoreCase("null")) return true;
+        if (user.optBoolean("is_blue_verified", false)
+                || user.optBoolean("ext_is_blue_verified", false)) return true;
+
+        JSONObject verification = user.optJSONObject("verification");
+        if (verification != null) {
+            if (verification.optBoolean("verified", false)
+                    || hasVerifiedType(verification)) return true;
         }
+        if (hasVerifiedType(user)) return true;
+
         JSONObject legacy = user.optJSONObject("legacy");
         return legacy != null && legacy.optBoolean("verified", false);
     }
 
+    private static boolean hasVerifiedType(JSONObject user) {
+        if (!user.has("verified_type") || user.isNull("verified_type")) return false;
+        String type = user.optString("verified_type", "");
+        return !type.isEmpty()
+                && !"None".equalsIgnoreCase(type)
+                && !"null".equalsIgnoreCase(type);
+    }
+
     private static byte[] readAll(InputStream in) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream(1 << 16);
-        byte[] buf = new byte[1 << 16];
+        byte[] buffer = new byte[1 << 16];
         int n;
-        while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
+        while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
         return out.toByteArray();
     }
 
