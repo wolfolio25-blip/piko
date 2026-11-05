@@ -76,6 +76,7 @@ public class SettingsFragment extends PreferenceFragment implements SettingsSear
         if (!SettingsSearchUIController.isActive()) {
             SettingsSearchUIController.setContentState("", true, false);
             screenBuilder.buildSettingsCategories();
+            app.morphe.extension.twitter.patches.bookmarks.BookmarkFolders.addSettingsEntry(context, screen);
             // Vantage: the daily time limit row sits above everything else.
             app.morphe.extension.twitter.patches.timelimit.SettingsEntry.addTo(context, screen);
         } else if (TextUtils.isEmpty(query) || TextUtils.isEmpty(query.trim())) {
