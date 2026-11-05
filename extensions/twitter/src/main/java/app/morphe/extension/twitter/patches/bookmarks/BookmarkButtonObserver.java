@@ -116,7 +116,14 @@ public final class BookmarkButtonObserver {
             if (target.isClickable() &&
                     !(target.getAccessibilityDelegate() instanceof ClickDelegate)) {
                 View.AccessibilityDelegate original = target.getAccessibilityDelegate();
-                target.setAccessibilityDelegate(new ClickDelegate(original));
+                CharSequence description = target.getContentDescription();
+                target.setAccessibilityDelegate(new ClickDelegate(original,
+                        description == null ? "" : description.toString()));
+            } else if (target.getAccessibilityDelegate() instanceof ClickDelegate) {
+                ClickDelegate delegate = (ClickDelegate) target.getAccessibilityDelegate();
+                // The native label represents the state before the next user click.
+                CharSequence description = target.getContentDescription();
+                if (description != null) delegate.previousLabel = description.toString();
             }
         }
         if (view instanceof ViewGroup) {
@@ -146,14 +153,21 @@ public final class BookmarkButtonObserver {
 
     private static final class ClickDelegate extends View.AccessibilityDelegate {
         final View.AccessibilityDelegate original;
-        ClickDelegate(View.AccessibilityDelegate original) { this.original = original; }
+        String previousLabel;
+        ClickDelegate(View.AccessibilityDelegate original, String previousLabel) {
+            this.original = original;
+            this.previousLabel = previousLabel;
+        }
 
         @Override
         public void sendAccessibilityEvent(View host, int eventType) {
             if (original == null) super.sendAccessibilityEvent(host, eventType);
             else original.sendAccessibilityEvent(host, eventType);
             if (eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
-                host.post(() -> onBookmarkClicked(host));
+                final String labelBeforeClick = previousLabel;
+                CharSequence current = host.getContentDescription();
+                previousLabel = current == null ? "" : current.toString();
+                host.post(() -> onBookmarkClicked(host, labelBeforeClick));
             }
         }
 
@@ -201,14 +215,15 @@ public final class BookmarkButtonObserver {
         }
     }
 
-    private static void onBookmarkClicked(View clicked) {
+    private static void onBookmarkClicked(View clicked, String previousLabel) {
         Context ctx = clicked.getContext();
         Activity activity = findActivity(ctx);
         if (activity == null || activity.isFinishing() || activity.isDestroyed()) return;
         // Do not open a picker for an already-bookmarked post being REMOVED.
-        String description = clicked.getContentDescription() == null ? ""
-                : clicked.getContentDescription().toString().toLowerCase(java.util.Locale.ROOT);
-        if (description.contains("remove") || description.contains("delete")) return;
+        String description = previousLabel == null ? ""
+                : previousLabel.toLowerCase(java.util.Locale.ROOT);
+        if (description.contains("remove") || description.contains("delete")
+                || description.contains("bookmarked")) return;
 
         Tweet tweet = findTweet(clicked);
         if (tweet == null) {
