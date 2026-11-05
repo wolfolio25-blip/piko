@@ -223,6 +223,11 @@ val settingsPatch =
                 0,
                 "$SSTS_DESCRIPTOR->load()V",
             )
+            // Inject the two-tab folder UI into X's legacy BookmarkActivity.
+            twitterInitHook.fingerprint.method.addInstruction(
+                0,
+                "invoke-static { p0 }, Lapp/morphe/extension/twitter/patches/bookmarks/BookmarkTabs;->install(Landroid/app/Application;)V",
+            )
 
             // execute ends.
         }
