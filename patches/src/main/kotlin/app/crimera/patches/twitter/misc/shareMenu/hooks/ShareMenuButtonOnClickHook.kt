@@ -56,6 +56,8 @@ val shareMenuButtonOnClickHook =
                     addInstructionsWithLabels(
                         nextInstructionIndex,
                         """
+                        move-object/from16 v$freeRegister, p$tweetObjectParameter
+                        invoke-static {v$contextRegister,v$buttonPressedRegister,v$freeRegister}, Lapp/morphe/extension/twitter/patches/bookmarks/BookmarkFolders;->onBookmarkAction(Landroid/content/Context;Ljava/lang/Object;Ljava/lang/Object;)V
                         invoke-static {v$buttonPressedRegister}, ${EXTENSION_CLASS_NAME}isButtonPressed(Ljava/lang/Object;)Z
                         move-result v$freeRegister
                         if-eqz v$freeRegister, :piko
