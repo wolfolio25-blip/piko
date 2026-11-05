@@ -285,6 +285,13 @@ public class Utils {
 
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
     public static void downloadFile(String url, String mediaName, String ext) {
+        // X animated GIFs are MP4 streams: transcode them to a real animated GIF.
+        if (app.morphe.extension.twitter.patches.nativeFeatures.downloader.TrueGifDownloader
+                .isAnimatedGif(url, ext)) {
+            app.morphe.extension.twitter.patches.nativeFeatures.downloader.TrueGifDownloader
+                    .download(ctx, url, mediaName);
+            return;
+        }
         String filename = sanitizeFilename(mediaName + "." + ext);
         boolean isPhoto = ext.equals("jpg");
 
