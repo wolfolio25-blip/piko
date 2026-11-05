@@ -28,7 +28,7 @@ public final class BookmarkFolders {
 
     private BookmarkFolders() {}
 
-    private static JSONArray read(Context context) {
+    static JSONArray read(Context context) {
         String source = context.getApplicationContext()
                 .getSharedPreferences(STORE, Context.MODE_PRIVATE)
                 .getString(KEY, "[]");
@@ -59,6 +59,20 @@ public final class BookmarkFolders {
             return true;
         });
         screen.addPreference(preference);
+    }
+
+    /**
+     * After X's native add-bookmark action, show the same local folder picker.
+     * This leaves server bookmarking untouched and avoids Premium-only APIs.
+     */
+    public static void onBookmarkAction(Context context, Object action, Object tweetObject) {
+        if (!(context instanceof android.app.Activity) || tweetObject == null || action == null) return;
+        String name = String.valueOf(action);
+        if ("Bookmark".equalsIgnoreCase(name)
+                || "AddBookmark".equalsIgnoreCase(name)
+                || "AddToBookmarks".equalsIgnoreCase(name)) {
+            saveTweet(context, new Tweet(tweetObject));
+        }
     }
 
     /** Called from the Piko tweet share menu; no additional X API permissions. */
@@ -135,7 +149,7 @@ public final class BookmarkFolders {
                 .setNegativeButton("Cancel", null).show();
     }
 
-    private static void promptNewFolder(Context context, Runnable onCreated) {
+    static void promptNewFolder(Context context, Runnable onCreated) {
         EditText input = new EditText(context);
         input.setSingleLine(true);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
@@ -218,6 +232,10 @@ public final class BookmarkFolders {
     }
 
     private static void showPost(Context context, int folderIndex, int postIndex) {
+        showPost(context, folderIndex, postIndex, null);
+    }
+
+    static void showPost(Context context, int folderIndex, int postIndex, Runnable onChanged) {
         JSONArray folders = read(context);
         JSONObject folder = folders.optJSONObject(folderIndex);
         JSONArray posts = folder == null ? null : folder.optJSONArray("posts");
@@ -243,13 +261,21 @@ public final class BookmarkFolders {
                                 save(context, current);
                             }
                         }
-                        showFolder(context, folderIndex);
+                        if (onChanged != null) onChanged.run();
+                        else showFolder(context, folderIndex);
                     }
-                }).setNegativeButton("Cancel", (dialog, which) -> showFolder(context, folderIndex))
+                }).setNegativeButton("Cancel", (dialog, which) -> {
+                    if (onChanged != null) onChanged.run();
+                    else showFolder(context, folderIndex);
+                })
                 .show();
     }
 
     private static void manageFolder(Context context, int folderIndex) {
+        manageFolder(context, folderIndex, () -> showFolders(context));
+    }
+
+    static void manageFolder(Context context, int folderIndex, Runnable onChanged) {
         JSONArray folders = read(context);
         JSONObject folder = folders.optJSONObject(folderIndex);
         if (folder == null) return;
@@ -271,7 +297,7 @@ public final class BookmarkFolders {
                                         try { target.put("name", newName); save(context, current); }
                                         catch (Exception ignored) { toast(context, "Rename failed"); }
                                     }
-                                    showFolders(context);
+                                    if (onChanged != null) onChanged.run();
                                 }).show();
                     } else {
                         new AlertDialog.Builder(context)
@@ -286,7 +312,7 @@ public final class BookmarkFolders {
                                             save(context, current);
                                         }
                                     }
-                                    showFolders(context);
+                                    if (onChanged != null) onChanged.run();
                                 }).show();
                     }
                 }).setNegativeButton("Cancel", null).show();
