@@ -259,6 +259,16 @@ public final class BookmarkButtonObserver {
         int[] budget = {420};
         View current = view;
         for (int i = 0; current != null && i < 12; i++) {
+            // Never scan an entire list adapter: it can contain many unrelated posts.
+            if (current instanceof android.widget.AbsListView) break;
+            boolean wholeList = false;
+            for (Class<?> type = current.getClass(); type != null; type = type.getSuperclass()) {
+                if ("androidx.recyclerview.widget.RecyclerView".equals(type.getName())) {
+                    wholeList = true;
+                    break;
+                }
+            }
+            if (wholeList) break;
             Tweet fromTag = probe(current.getTag(), seen, budget, 0);
             if (fromTag != null) return fromTag;
             Tweet fromView = probe(current, seen, budget, 0);
@@ -289,7 +299,8 @@ public final class BookmarkButtonObserver {
 
         if (obj instanceof List) {
             List<?> list = (List<?>) obj;
-            for (int i = 0; i < Math.min(list.size(), 6); i++) {
+            if (list.size() > 4) return null;
+            for (int i = 0; i < list.size(); i++) {
                 Tweet tweet = probe(list.get(i), seen, budget, depth + 1);
                 if (tweet != null) return tweet;
             }
