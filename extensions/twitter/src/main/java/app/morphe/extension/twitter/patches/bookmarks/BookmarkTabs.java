@@ -122,6 +122,7 @@ public final class BookmarkTabs {
             }
             INSTALLED.put(activity, page);
             page.switchTo(false);
+            page.shell.post(page::positionControls);
         } catch (Exception exception) {
             // Restore the original children if a vendor-specific layout rejects wrapping.
             content.removeAllViews();
@@ -145,8 +146,12 @@ public final class BookmarkTabs {
         final int background;
         final int primary;
         final int secondary;
-        final LinearLayout shell;
+        final FrameLayout shell;
         final FrameLayout originalView;
+        final LinearLayout tabBar;
+        final View tabDivider;
+        private View adjustedList;
+        private int listPaddingTop;
         final ScrollView foldersView;
         final TextView allTab;
         final TextView foldersTab;
@@ -160,16 +165,22 @@ public final class BookmarkTabs {
             this.primary = isDark ? DARK_TEXT : LIGHT_TEXT;
             this.secondary = isDark ? 0xFF71767B : 0xFF536471;
 
-            shell = new LinearLayout(activity);
-            shell.setOrientation(LinearLayout.VERTICAL);
+            shell = new FrameLayout(activity);
             shell.setBackgroundColor(background);
 
-            LinearLayout bar = new LinearLayout(activity);
-            bar.setOrientation(LinearLayout.HORIZONTAL);
-            bar.setBackgroundColor(background);
-            shell.addView(bar, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, dp(activity, 52)));
+            // Preserve X's entire Bookmarks screen, including its native top toolbar.
+            originalView = new FrameLayout(activity);
+            shell.addView(originalView, fullFrame());
 
+            // Add the two tabs as an overlay below X's native Bookmarks heading,
+            // never above the system status bar or above its back button.
+            tabBar = new LinearLayout(activity);
+            tabBar.setOrientation(LinearLayout.HORIZONTAL);
+            tabBar.setBackgroundColor(background);
+            tabBar.setElevation(dp(activity, 3));
+            shell.addView(tabBar, new FrameLayout.LayoutParams(-1, dp(activity, 52)));
+
+            LinearLayout bar = tabBar;
             LinearLayout left = tabContainer();
             LinearLayout right = tabContainer();
             bar.addView(left, new LinearLayout.LayoutParams(0, -1, 1));
@@ -185,19 +196,108 @@ public final class BookmarkTabs {
             left.setOnClickListener(v -> switchTo(false));
             right.setOnClickListener(v -> switchTo(true));
 
-            View divider = new View(activity);
-            divider.setBackgroundColor(isDark ? 0xFF2F3336 : 0xFFEFF3F4);
-            shell.addView(divider, new LinearLayout.LayoutParams(-1, dp(activity, 1)));
-
-            FrameLayout body = new FrameLayout(activity);
-            shell.addView(body, new LinearLayout.LayoutParams(-1, 0, 1));
-
-            originalView = new FrameLayout(activity);
-            body.addView(originalView, fullFrame());
             foldersView = new ScrollView(activity);
             foldersView.setFillViewport(true);
             foldersView.setBackgroundColor(background);
-            body.addView(foldersView, fullFrame());
+            foldersView.setClickable(true);
+            shell.addView(foldersView, new FrameLayout.LayoutParams(-1, -1));
+            foldersView.setElevation(dp(activity, 1));
+
+            tabDivider = new View(activity);
+            tabDivider.setBackgroundColor(isDark ? 0xFF2F3336 : 0xFFEFF3F4);
+            shell.addView(tabDivider, new FrameLayout.LayoutParams(-1, dp(activity, 1)));
+            tabDivider.setElevation(dp(activity, 4));
+            tabBar.bringToFront();
+        }
+
+        /** Place tabs after the existing X toolbar, measured from its actual title. */
+        void positionControls() {
+            if (activity.isFinishing() || activity.isDestroyed()) return;
+            final int[] rootPos = new int[2];
+            shell.getLocationOnScreen(rootPos);
+            TextView heading = findBookmarksTitle(originalView, 0);
+            int top;
+            if (heading != null && heading.getHeight() > 0) {
+                int[] pos = new int[2];
+                heading.getLocationOnScreen(pos);
+                top = pos[1] - rootPos[1] + heading.getHeight() + dp(activity, 14);
+            } else {
+                // Edge-to-edge fallback; status bar height must be accounted for.
+                int status = activity.getResources().getIdentifier("status_bar_height", "dimen", "android");
+                int statusHeight = status > 0
+                        ? activity.getResources().getDimensionPixelSize(status) : dp(activity, 24);
+                top = statusHeight + dp(activity, 58);
+            }
+            top = Math.max(dp(activity, 64), Math.min(top, shell.getHeight() / 3));
+            FrameLayout.LayoutParams barParams =
+                    new FrameLayout.LayoutParams(-1, dp(activity, 52));
+            barParams.topMargin = top;
+            tabBar.setLayoutParams(barParams);
+            FrameLayout.LayoutParams lineParams =
+                    new FrameLayout.LayoutParams(-1, dp(activity, 1));
+            lineParams.topMargin = top + dp(activity, 52);
+            tabDivider.setLayoutParams(lineParams);
+            FrameLayout.LayoutParams foldersParams = new FrameLayout.LayoutParams(-1, -1);
+            foldersParams.topMargin = top + dp(activity, 53);
+            foldersView.setLayoutParams(foldersParams);
+
+            // RecyclerView padding makes the first native post start BELOW the tabs
+            // instead of being obscured by them. Never resize the native toolbar.
+            if (adjustedList == null) {
+                View list = findTweetList(originalView, 0, top + rootPos[1]);
+                if (list != null) {
+                    adjustedList = list;
+                    listPaddingTop = list.getPaddingTop();
+                    list.setPadding(list.getPaddingLeft(), listPaddingTop + dp(activity, 53),
+                            list.getPaddingRight(), list.getPaddingBottom());
+                    if (list instanceof ViewGroup) ((ViewGroup) list).setClipToPadding(false);
+                }
+            }
+        }
+
+        private TextView findBookmarksTitle(View view, int depth) {
+            if (view == null || depth > 24) return null;
+            if (view instanceof TextView) {
+                String value = String.valueOf(((TextView) view).getText()).trim();
+                if ("Bookmarks".equalsIgnoreCase(value)) return (TextView) view;
+            }
+            if (view instanceof ViewGroup) {
+                ViewGroup group = (ViewGroup) view;
+                for (int i = 0; i < group.getChildCount(); i++) {
+                    TextView match = findBookmarksTitle(group.getChildAt(i), depth + 1);
+                    if (match != null) return match;
+                }
+            }
+            return null;
+        }
+
+        private View findTweetList(View view, int depth, int headingBottom) {
+            if (view == null || depth > 24) return null;
+            Class<?> type = view.getClass();
+            boolean recycler = false;
+            for (Class<?> k = type; k != null; k = k.getSuperclass()) {
+                String name = k.getName();
+                if (name.equals("androidx.recyclerview.widget.RecyclerView")
+                        || name.equals("android.widget.ListView")
+                        || name.equals("com.twitter.android.widget.RefreshableListView")) {
+                    recycler = true;
+                    break;
+                }
+            }
+            if (recycler && view.getWidth() >= dp(activity, 200)
+                    && view.getHeight() >= dp(activity, 80)) {
+                int[] pos = new int[2];
+                view.getLocationOnScreen(pos);
+                if (pos[1] >= headingBottom - dp(activity, 85)) return view;
+            }
+            if (view instanceof ViewGroup) {
+                ViewGroup group = (ViewGroup) view;
+                for (int i = 0; i < group.getChildCount(); i++) {
+                    View match = findTweetList(group.getChildAt(i), depth + 1, headingBottom);
+                    if (match != null) return match;
+                }
+            }
+            return null;
         }
 
         private LinearLayout tabContainer() {
@@ -225,7 +325,8 @@ public final class BookmarkTabs {
         }
 
         void switchTo(boolean folders) {
-            originalView.setVisibility(folders ? View.GONE : View.VISIBLE);
+            // Keep the native header visible on both tabs; cover only the post list.
+            originalView.setVisibility(View.VISIBLE);
             foldersView.setVisibility(folders ? View.VISIBLE : View.GONE);
             allTab.setTextColor(folders ? secondary : primary);
             foldersTab.setTextColor(folders ? primary : secondary);
