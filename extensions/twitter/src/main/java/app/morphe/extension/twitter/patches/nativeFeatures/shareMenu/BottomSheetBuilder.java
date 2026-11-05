@@ -19,6 +19,7 @@ import app.morphe.extension.crimera.PikoUtils;
 import app.morphe.extension.crimera.ObjectBrowser;
 
 import app.morphe.extension.twitter.patches.nativeFeatures.downloader.NativeDownloader;
+import app.morphe.extension.twitter.patches.bookmarks.BookmarkFolders;
 import app.morphe.extension.twitter.patches.nativeFeatures.shareImage.ShareImageHandler;
 import app.morphe.extension.twitter.patches.nativeFeatures.translator.NativeTranslator;
 import app.morphe.extension.twitter.patches.nativeFeatures.readerMode.ReaderModeUtils;
@@ -34,6 +35,13 @@ public class BottomSheetBuilder {
         Object tweetObject = tweet.getObject();
         List<BottomSheetAction<Tweet>> actions = new ArrayList<>();
         ArrayList itemsToHide = Pref.nativeShareMenuToHide();
+
+        // Local bookmark folders are separate from X Premium server-side folders.
+        actions.add(new BottomSheetAction<>("ic_vector_book_stroke_on",
+                "Save to folder", t -> BookmarkFolders.saveTweet(context, t)));
+        actions.add(new BottomSheetAction<>("ic_vector_layers_stroke",
+                "Bookmark folders", t -> BookmarkFolders.showFolders(context)));
+
 
         String itemKey = "copy_tweet_link";
         if(!itemsToHide.contains(itemKey)) {
