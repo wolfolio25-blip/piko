@@ -44,6 +44,7 @@ public final class BookmarkTabs {
     public static synchronized void install(Application application) {
         if (registered || application == null) return;
         registered = true;
+        BookmarkButtonObserver.install(application);
         application.registerActivityLifecycleCallbacks(new Application.ActivityLifecycleCallbacks() {
             @Override public void onActivityCreated(Activity a, Bundle s) {}
             @Override public void onActivityStarted(Activity a) {}
