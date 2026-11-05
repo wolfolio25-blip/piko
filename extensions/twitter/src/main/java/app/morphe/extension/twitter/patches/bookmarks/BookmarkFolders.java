@@ -66,12 +66,24 @@ public final class BookmarkFolders {
      * This leaves server bookmarking untouched and avoids Premium-only APIs.
      */
     public static void onBookmarkAction(Context context, Object action, Object tweetObject) {
-        if (!(context instanceof android.app.Activity) || tweetObject == null || action == null) return;
-        String name = String.valueOf(action);
-        if ("Bookmark".equalsIgnoreCase(name)
-                || "AddBookmark".equalsIgnoreCase(name)
-                || "AddToBookmarks".equalsIgnoreCase(name)) {
-            saveTweet(context, new Tweet(tweetObject));
+        if (context == null || tweetObject == null || action == null) return;
+        try {
+            // Some X view hierarchies pass a ContextThemeWrapper instead of Activity.
+            Context current = context;
+            for (int i = 0; i < 8 && current != null
+                    && !(current instanceof android.app.Activity); i++) {
+                current = current instanceof android.content.ContextWrapper
+                        ? ((android.content.ContextWrapper) current).getBaseContext() : null;
+            }
+            if (!(current instanceof android.app.Activity)) return;
+            String name = String.valueOf(action);
+            if ("Bookmark".equalsIgnoreCase(name)
+                    || "AddBookmark".equalsIgnoreCase(name)
+                    || "AddToBookmarks".equalsIgnoreCase(name)) {
+                saveTweet(current, new Tweet(tweetObject));
+            }
+        } catch (Exception exception) {
+            android.util.Log.e("PikoBookmarkFolders", "Bookmark action failed", exception);
         }
     }
 
