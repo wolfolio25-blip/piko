@@ -202,6 +202,7 @@ final class BookmarkChrome {
                 attrs.height = WindowManager.LayoutParams.WRAP_CONTENT;
                 window.setAttributes(attrs);
                 window.setNavigationBarColor(chrome.background);
+                window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
             }
         }
 
@@ -279,6 +280,53 @@ final class BookmarkChrome {
                 window.setGravity(Gravity.BOTTOM);
             }
         }
+    }
+
+    /** Minimal in-app confirmation instead of a stock Android Toast. */
+    static void notice(Context context, String message) {
+        Context next = context;
+        android.app.Activity activity = null;
+        for (int i = 0; i < 10 && next != null; i++) {
+            if (next instanceof android.app.Activity) {
+                activity = (android.app.Activity) next;
+                break;
+            }
+            next = next instanceof android.content.ContextWrapper
+                    ? ((android.content.ContextWrapper) next).getBaseContext() : null;
+        }
+        if (activity == null || activity.isFinishing()) {
+            android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        BookmarkChrome ui = new BookmarkChrome(activity);
+        View root = activity.findViewById(android.R.id.content);
+        if (!(root instanceof android.widget.FrameLayout)) {
+            android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
+        android.widget.FrameLayout frame = (android.widget.FrameLayout) root;
+        TextView notice = ui.text(message, 14, false, 0xFFFFFFFF);
+        notice.setPadding(ui.dp(18), ui.dp(12), ui.dp(18), ui.dp(12));
+        notice.setGravity(Gravity.CENTER);
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(ui.dark ? 0xFF2F3336 : 0xFF0F1419);
+        shape.setCornerRadius(ui.dp(12));
+        notice.setBackground(shape);
+        notice.setElevation(ui.dp(10));
+        android.widget.FrameLayout.LayoutParams lp =
+                new android.widget.FrameLayout.LayoutParams(-2, -2,
+                        Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        lp.bottomMargin = ui.dp(72);
+        lp.leftMargin = ui.dp(22);
+        lp.rightMargin = ui.dp(22);
+        frame.addView(notice, lp);
+        notice.setAlpha(0f);
+        notice.animate().alpha(1f).setDuration(130).start();
+        notice.postDelayed(() -> notice.animate().alpha(0f).setDuration(160)
+                .withEndAction(() -> {
+                    if (notice.getParent() instanceof ViewGroup)
+                        ((ViewGroup) notice.getParent()).removeView(notice);
+                }).start(), 2200);
     }
 
     static Drawable pill(BookmarkChrome chrome, int color) {
