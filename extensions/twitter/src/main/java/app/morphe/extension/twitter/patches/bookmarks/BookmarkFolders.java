@@ -49,7 +49,7 @@ public final class BookmarkFolders {
     }
 
     private static void notifyUser(Context context, String message) {
-        Toast.makeText(context, message, Toast.LENGTH_SHORT).show();
+        BookmarkChrome.notice(context, message);
     }
 
     public static void addSettingsEntry(Context context, PreferenceScreen screen) {
@@ -103,9 +103,15 @@ public final class BookmarkFolders {
             JSONObject post = new JSONObject();
             String id = String.valueOf(tweet.getTweetId());
             if (id.isEmpty() || "null".equals(id)) return null;
-            String username = tweet.getTweetUsername();
-            String displayName = tweet.getTweetProfileName();
-            String text = tweet.getText();
+            String username;
+            String displayName;
+            String text;
+            try { username = tweet.getTweetUsername(); }
+            catch (Exception ignored) { username = ""; }
+            try { displayName = tweet.getTweetProfileName(); }
+            catch (Exception ignored) { displayName = username; }
+            try { text = tweet.getText(); }
+            catch (Exception ignored) { text = ""; }
 
             if (username == null) username = "";
             if (displayName == null || displayName.isEmpty()) displayName = username;
