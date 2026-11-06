@@ -40,7 +40,7 @@ on:
 
 concurrency:
   group: build-mpp
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: write
