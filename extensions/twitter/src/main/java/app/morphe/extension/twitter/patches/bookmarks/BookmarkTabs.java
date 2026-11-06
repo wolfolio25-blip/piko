@@ -336,100 +336,183 @@ public final class BookmarkTabs {
             if (folders) populateFolders();
         }
 
+        /** Flat folder rows, no Android cards, icons, emoji or stock controls. */
         private void populateFolders() {
-            LinearLayout list = new LinearLayout(activity);
-            list.setOrientation(LinearLayout.VERTICAL);
+            BookmarkChrome ui = new BookmarkChrome(activity);
+            LinearLayout list = ui.column();
             list.setBackgroundColor(background);
-            list.setPadding(dp(activity, 16), dp(activity, 18),
-                    dp(activity, 16), dp(activity, 32));
+            list.setPadding(0, ui.dp(8), 0, ui.dp(26));
             foldersView.removeAllViews();
             foldersView.addView(list, new ScrollView.LayoutParams(-1, -2));
 
-            TextView heading = label(activity, "Your folders", 22, primary);
-            heading.setTypeface(Typeface.DEFAULT_BOLD);
-            list.addView(heading, rowParams(4, 16));
+            LinearLayout create = ui.row();
+            create.setPadding(ui.dp(20), 0, ui.dp(20), 0);
+            create.setMinimumHeight(ui.dp(54));
+            create.setBackground(ui.ripple());
+            LinearLayout.LayoutParams iconP = new LinearLayout.LayoutParams(ui.dp(23), ui.dp(23));
+            iconP.rightMargin = ui.dp(18);
+            create.addView(ui.icon(BookmarkChrome.PLUS, BookmarkChrome.BLUE, 23), iconP);
+            TextView createLabel = ui.text("Create a folder", 16, true, BookmarkChrome.BLUE);
+            create.addView(createLabel, new LinearLayout.LayoutParams(0, -2, 1f));
+            create.setOnClickListener(v ->
+                    BookmarkFolders.promptNewFolder(activity, this::populateFolders));
+            list.addView(create, new LinearLayout.LayoutParams(-1, ui.dp(54)));
+            list.addView(ui.divider());
 
-            TextView create = label(activity, "+ Create new folder", 16, BLUE);
-            create.setPadding(dp(activity, 16), 0, dp(activity, 16), 0);
-            create.setBackgroundColor(isDark ? 0xFF16181C : 0xFFF7F9F9);
-            list.addView(create, rowParams(8, 56));
-            create.setOnClickListener(v -> BookmarkFolders.promptNewFolder(
-                    activity, this::populateFolders));
+            android.widget.EditText search = ui.input("Search folders", "");
+            search.setSingleLine(true);
+            LinearLayout.LayoutParams searchParams = new LinearLayout.LayoutParams(-1, ui.dp(44));
+            searchParams.setMargins(ui.dp(16), ui.dp(14), ui.dp(16), ui.dp(12));
+            list.addView(search, searchParams);
 
+            LinearLayout rows = ui.column();
+            list.addView(rows, new LinearLayout.LayoutParams(-1, -2));
+            Runnable render = () -> drawFolderRows(ui, rows,
+                    search.getText().toString().trim().toLowerCase(java.util.Locale.ROOT));
+            search.addTextChangedListener(new android.text.TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                    render.run();
+                }
+                @Override public void afterTextChanged(android.text.Editable text) {}
+            });
+            render.run();
+        }
+
+        private void drawFolderRows(BookmarkChrome ui, LinearLayout rows, String query) {
+            rows.removeAllViews();
             JSONArray folders = BookmarkFolders.read(activity);
-            if (folders.length() == 0) {
-                TextView empty = label(activity,
-                        "No folders yet. Create one, then bookmark a post to add it.", 14, secondary);
-                empty.setPadding(dp(activity, 8), dp(activity, 20), 0, 0);
-                list.addView(empty, new LinearLayout.LayoutParams(-1, -2));
-                return;
-            }
-
+            int matched = 0;
             for (int i = 0; i < folders.length(); i++) {
-                final int index = i;
                 JSONObject folder = folders.optJSONObject(i);
                 if (folder == null) continue;
                 String name = folder.optString("name", "Folder");
+                if (!query.isEmpty() && !name.toLowerCase(java.util.Locale.ROOT).contains(query)) continue;
+                matched++;
+                int index = i;
                 JSONArray posts = folder.optJSONArray("posts");
                 int count = posts == null ? 0 : posts.length();
-                TextView row = label(activity, "▣  " + name + "   ·   " + count + " posts", 16, primary);
-                row.setPadding(dp(activity, 16), 0, dp(activity, 16), 0);
-                row.setBackgroundColor(isDark ? 0xFF16181C : 0xFFF7F9F9);
-                list.addView(row, rowParams(8, 60));
-                row.setOnClickListener(v -> showPosts(index));
-                row.setOnLongClickListener(v -> {
-                    BookmarkFolders.manageFolder(activity, index, this::populateFolders);
-                    return true;
-                });
-            }
-        }
 
-        private LinearLayout.LayoutParams rowParams(int topDp, int heightDp) {
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1,
-                    dp(activity, heightDp));
-            params.topMargin = dp(activity, topDp);
-            return params;
+                LinearLayout item = ui.row();
+                item.setPadding(ui.dp(18), ui.dp(12), ui.dp(18), ui.dp(12));
+                item.setMinimumHeight(ui.dp(76));
+                item.setBackground(ui.ripple());
+
+                LinearLayout.LayoutParams iconParams =
+                        new LinearLayout.LayoutParams(ui.dp(26), ui.dp(26));
+                iconParams.rightMargin = ui.dp(18);
+                item.addView(ui.icon(BookmarkChrome.FOLDER, primary, 26), iconParams);
+
+                LinearLayout labels = ui.column();
+                labels.setBackgroundColor(android.graphics.Color.TRANSPARENT);
+                labels.addView(ui.text(name, 16, true, primary),
+                        new LinearLayout.LayoutParams(-1, -2));
+                LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(-1, -2);
+                subtitleParams.topMargin = ui.dp(4);
+                labels.addView(ui.text(count + (count == 1 ? " post" : " posts"),
+                        14, false, secondary), subtitleParams);
+                item.addView(labels, new LinearLayout.LayoutParams(0, -2, 1f));
+
+                TextView menu = ui.text("···", 25, false, secondary);
+                menu.setGravity(Gravity.CENTER);
+                menu.setContentDescription("Folder options");
+                menu.setBackground(ui.ripple());
+                item.addView(menu, new LinearLayout.LayoutParams(ui.dp(42), ui.dp(42)));
+                menu.setOnClickListener(v ->
+                        BookmarkFolders.manageFolder(activity, index, this::populateFolders));
+                item.setOnClickListener(v -> showPosts(index));
+                rows.addView(item, new LinearLayout.LayoutParams(-1, -2));
+                rows.addView(ui.divider());
+            }
+            if (matched == 0) {
+                String message = folders.length() == 0
+                        ? "No folders yet. Create one to organize saved posts."
+                        : "No matching folders";
+                TextView empty = ui.text(message, 15, false, secondary);
+                empty.setGravity(Gravity.CENTER);
+                empty.setPadding(ui.dp(32), ui.dp(50), ui.dp(32), ui.dp(30));
+                rows.addView(empty, new LinearLayout.LayoutParams(-1, -2));
+            }
         }
 
         private void showPosts(int folderIndex) {
             JSONArray folders = BookmarkFolders.read(activity);
             JSONObject folder = folders.optJSONObject(folderIndex);
             if (folder == null) { populateFolders(); return; }
-            JSONArray posts = folder.optJSONArray("posts");
 
-            LinearLayout list = new LinearLayout(activity);
-            list.setOrientation(LinearLayout.VERTICAL);
-            list.setPadding(dp(activity, 16), dp(activity, 12),
-                    dp(activity, 16), dp(activity, 24));
+            BookmarkChrome ui = new BookmarkChrome(activity);
+            LinearLayout list = ui.column();
             foldersView.removeAllViews();
             foldersView.addView(list, new ScrollView.LayoutParams(-1, -2));
 
-            TextView back = label(activity, "‹  Folders", 16, BLUE);
-            list.addView(back, rowParams(0, 46));
-            back.setOnClickListener(v -> populateFolders());
+            LinearLayout backRow = ui.row();
+            backRow.setPadding(ui.dp(16), 0, ui.dp(16), 0);
+            backRow.setMinimumHeight(ui.dp(54));
+            backRow.setBackground(ui.ripple());
+            LinearLayout.LayoutParams arrowParams =
+                    new LinearLayout.LayoutParams(ui.dp(22), ui.dp(22));
+            arrowParams.rightMargin = ui.dp(14);
+            backRow.addView(ui.icon(BookmarkChrome.BACK, primary, 22), arrowParams);
+            TextView name = ui.text(folder.optString("name", "Folder"), 19, true, primary);
+            backRow.addView(name, new LinearLayout.LayoutParams(0, -2, 1f));
+            backRow.setOnClickListener(v -> populateFolders());
+            list.addView(backRow, new LinearLayout.LayoutParams(-1, ui.dp(56)));
+            list.addView(ui.divider());
 
-            TextView title = label(activity, folder.optString("name"), 22, primary);
-            title.setTypeface(Typeface.DEFAULT_BOLD);
-            list.addView(title, rowParams(4, 48));
+            android.widget.EditText search = ui.input("Search saved posts", "");
+            LinearLayout.LayoutParams searchParams =
+                    new LinearLayout.LayoutParams(-1, ui.dp(44));
+            searchParams.setMargins(ui.dp(16), ui.dp(14), ui.dp(16), ui.dp(12));
+            list.addView(search, searchParams);
 
-            if (posts == null || posts.length() == 0) {
-                list.addView(label(activity, "No posts in this folder.", 14, secondary));
-                return;
+            LinearLayout rows = ui.column();
+            list.addView(rows, new LinearLayout.LayoutParams(-1, -2));
+            Runnable render = () -> drawSavedPosts(ui, rows, folderIndex,
+                    search.getText().toString().trim().toLowerCase(java.util.Locale.ROOT));
+            search.addTextChangedListener(new android.text.TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                    render.run();
+                }
+                @Override public void afterTextChanged(android.text.Editable text) {}
+            });
+            render.run();
+        }
+
+        /** Render saved snapshots with X-like tweet rows and real image previews. */
+        private void drawSavedPosts(BookmarkChrome ui, LinearLayout rows,
+                                    int folderIndex, String query) {
+            rows.removeAllViews();
+            JSONArray folders = BookmarkFolders.read(activity);
+            JSONObject folder = folders.optJSONObject(folderIndex);
+            JSONArray posts = folder == null ? null : folder.optJSONArray("posts");
+            int matched = 0;
+            if (posts != null) {
+                for (int i = posts.length() - 1; i >= 0; i--) {
+                    JSONObject post = posts.optJSONObject(i);
+                    if (post == null) continue;
+                    String searchable = (post.optString("text") + " " +
+                            post.optString("label") + " " + post.optString("username"))
+                            .toLowerCase(java.util.Locale.ROOT);
+                    if (!searchable.contains(query)) continue;
+                    matched++;
+                    int postIndex = i;
+                    rows.addView(BookmarkPostView.build(activity, post, () ->
+                            BookmarkFolders.showPost(activity, folderIndex,
+                                    postIndex, () -> showPosts(folderIndex))),
+                            new LinearLayout.LayoutParams(-1, -2));
+                    rows.addView(ui.divider());
+                }
             }
-            for (int i = posts.length() - 1; i >= 0; i--) {
-                JSONObject post = posts.optJSONObject(i);
-                if (post == null) continue;
-                final int postIndex = i;
-                String text = post.optString("label", "Saved post");
-                TextView row = label(activity, text, 15, primary);
-                row.setMaxLines(3);
-                row.setPadding(dp(activity, 14), dp(activity, 8),
-                        dp(activity, 14), dp(activity, 8));
-                row.setBackgroundColor(isDark ? 0xFF16181C : 0xFFF7F9F9);
-                list.addView(row, rowParams(8, 82));
-                row.setOnClickListener(v -> BookmarkFolders.showPost(
-                        activity, folderIndex, postIndex, () -> showPosts(folderIndex)));
+            if (matched == 0) {
+                TextView empty = ui.text(
+                        query.isEmpty() ? "No posts in this folder yet" : "No matching posts",
+                        15, false, secondary);
+                empty.setGravity(Gravity.CENTER);
+                empty.setPadding(ui.dp(30), ui.dp(54), ui.dp(30), ui.dp(30));
+                rows.addView(empty, new LinearLayout.LayoutParams(-1, -2));
             }
         }
+
     }
 }
