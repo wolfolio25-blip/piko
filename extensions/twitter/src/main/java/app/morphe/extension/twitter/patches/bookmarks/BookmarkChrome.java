@@ -61,11 +61,10 @@ final class BookmarkChrome {
         int mode = context.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
         boolean darkTheme = mode == Configuration.UI_MODE_NIGHT_YES;
         try {
-            int id = context.getResources().getIdentifier("coreColorAppBackground", "color", context.getPackageName());
-            if (id != 0) {
-                int color = context.getResources().getColor(id, context.getTheme());
-                darkTheme = Color.red(color) + Color.green(color) + Color.blue(color) < 384;
-            }
+            // X has its own light/dim/dark theme independent of Android's setting.
+            int color = app.morphe.extension.twitter.Utils.resolveColor(
+                    context, "coreColorAppBackground");
+            darkTheme = Color.red(color) + Color.green(color) + Color.blue(color) < 384;
         } catch (Exception ignored) {}
         dark = darkTheme;
         background = dark ? 0xFF000000 : 0xFFFFFFFF;
