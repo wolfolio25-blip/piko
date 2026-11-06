@@ -217,6 +217,12 @@ public final class BookmarkTabs {
             final int[] rootPos = new int[2];
             shell.getLocationOnScreen(rootPos);
             TextView heading = findBookmarksTitle(originalView, 0);
+            if (heading != null) {
+                // The native app's own heading supplies the Chirp font family.
+                BookmarkChrome.captureNativeFont(heading.getTypeface());
+                allTab.setTypeface(BookmarkChrome.typeface(true));
+                foldersTab.setTypeface(BookmarkChrome.typeface(true));
+            }
             int top;
             if (heading != null && heading.getHeight() > 0) {
                 int[] pos = new int[2];
