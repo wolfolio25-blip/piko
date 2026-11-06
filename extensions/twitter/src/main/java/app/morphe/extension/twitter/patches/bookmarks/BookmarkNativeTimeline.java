@@ -30,6 +30,39 @@ public final class BookmarkNativeTimeline {
     private static final int MAX_RESPONSE_BYTES = 12 * 1024 * 1024;
 
     private static volatile Selection selected;
+    private static volatile boolean bookmarkScreenVisible;
+
+    public static void setBookmarkScreenVisible(boolean visible) {
+        bookmarkScreenVisible = visible;
+    }
+
+    /**
+     * Secondary fallback for the model-level URT entry parser. This lets the
+     * native X timeline filter cached or legacy entries even when its transport
+     * payload is not a bookmark_timeline_v2 GraphQL response.
+     */
+    public static boolean keepNativeEntryId(String entryId) {
+        Selection active = selected;
+        if (active == null || !bookmarkScreenVisible || entryId == null) return true;
+        if (entryId.startsWith("cursor-")) return true;
+        String id = idFromEntryId(entryId);
+        return id.isEmpty() || active.ids.contains(id);
+    }
+
+    private static String idFromEntryId(String entryId) {
+        int position = entryId.lastIndexOf("tweet-");
+        int offset = 6;
+        if (position < 0 && entryId.startsWith("bookmark-")) {
+            position = 0;
+            offset = 9;
+        }
+        if (position < 0) return "";
+        String suffix = entryId.substring(position + offset);
+        int n = 0;
+        while (n < suffix.length() && Character.isDigit(suffix.charAt(n))) n++;
+        return n > 0 ? suffix.substring(0, n) : "";
+    }
+
 
     private static final class Selection {
         final String folder;
