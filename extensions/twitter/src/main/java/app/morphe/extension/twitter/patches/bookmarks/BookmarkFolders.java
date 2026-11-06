@@ -1,25 +1,28 @@
 /*
  * Copyright (C) 2026 piko <https://github.com/crimera/piko>
  *
- * Local bookmark folders for Piko. Not a server-side X Premium feature.
- * Folders and saved post links are stored on this device only.
+ * Local bookmark collections. All dialogs are custom X-style surfaces
+ * using BookmarkChrome. X's server bookmarks are not altered or removed.
  */
 package app.morphe.extension.twitter.patches.bookmarks;
 
-import android.app.AlertDialog;
+import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.preference.Preference;
 import android.preference.PreferenceScreen;
-import android.text.InputType;
 import android.widget.EditText;
 import android.widget.Toast;
+import android.view.View;
+import android.widget.LinearLayout;
 
 import app.morphe.extension.twitter.entity.Tweet;
+import app.morphe.extension.twitter.entity.Media;
 import org.json.JSONArray;
 import org.json.JSONObject;
+import java.util.ArrayList;
 
 public final class BookmarkFolders {
     private static final String STORE = "piko_local_bookmark_folders";
@@ -45,15 +48,14 @@ public final class BookmarkFolders {
                 .edit().putString(KEY, folders.toString()).apply();
     }
 
-    private static void toast(Context c, String message) {
-        Toast.makeText(c, message, Toast.LENGTH_SHORT).show();
+    private static void notifyUser(Context context, String message) {
+        Toast.makeText(context, message, Toast.LENGTH_SHORT).show();
     }
 
-    /** Installed as a separate entry in Piko settings. */
     public static void addSettingsEntry(Context context, PreferenceScreen screen) {
         Preference preference = new Preference(context);
         preference.setTitle("Bookmark folders");
-        preference.setSummary("Organize post links in local folders (not synced with X)");
+        preference.setSummary("Local folders · organize saved posts");
         preference.setOnPreferenceClickListener(p -> {
             showFolders(context);
             return true;
@@ -61,190 +63,235 @@ public final class BookmarkFolders {
         screen.addPreference(preference);
     }
 
-    /**
-     * After X's native add-bookmark action, show the same local folder picker.
-     * This leaves server bookmarking untouched and avoids Premium-only APIs.
-     */
+    /** Best-effort hook for X's share menu bookmark action. */
     public static void onBookmarkAction(Context context, Object action, Object tweetObject) {
         if (context == null || tweetObject == null || action == null) return;
         try {
-            // Some X view hierarchies pass a ContextThemeWrapper instead of Activity.
-            Context current = context;
-            for (int i = 0; i < 8 && current != null
-                    && !(current instanceof android.app.Activity); i++) {
-                current = current instanceof android.content.ContextWrapper
-                        ? ((android.content.ContextWrapper) current).getBaseContext() : null;
-            }
-            if (!(current instanceof android.app.Activity)) return;
+            Activity activity = getActivity(context);
+            if (activity == null) return;
             String name = String.valueOf(action);
             if ("Bookmark".equalsIgnoreCase(name)
                     || "AddBookmark".equalsIgnoreCase(name)
                     || "AddToBookmarks".equalsIgnoreCase(name)) {
-                saveTweet(current, new Tweet(tweetObject));
+                saveTweet(activity, new Tweet(tweetObject));
             }
         } catch (Exception exception) {
             android.util.Log.e("PikoBookmarkFolders", "Bookmark action failed", exception);
         }
     }
 
-    /** Called from the Piko tweet share menu; no additional X API permissions. */
+    private static Activity getActivity(Context context) {
+        for (int i = 0; context != null && i < 10; i++) {
+            if (context instanceof Activity) return (Activity) context;
+            context = context instanceof android.content.ContextWrapper
+                    ? ((android.content.ContextWrapper) context).getBaseContext() : null;
+        }
+        return null;
+    }
+
     public static void saveTweet(Context context, Tweet tweet) {
-        final String id;
-        final String link;
-        final String label;
-        try {
-            id = Long.toString(tweet.getTweetId());
-            link = tweet.getTweetLink();
-            String text = tweet.getText();
-            label = "@" + tweet.getTweetUsername() + " — " +
-                    (text == null || text.trim().isEmpty() ? "Post " + id : text.trim());
-        } catch (Exception exception) {
-            toast(context, "Could not identify the post");
+        JSONObject post = makeSnapshot(tweet);
+        if (post == null) {
+            notifyUser(context, "Could not read this post");
             return;
         }
-        chooseFolder(context, id, link, label);
+        chooseFolder(context, post);
     }
 
-    private static String[] names(JSONArray folders, boolean withNew) {
-        int length = folders.length();
-        String[] choices = new String[length + (withNew ? 1 : 0)];
-        for (int i = 0; i < length; i++) {
-            JSONObject folder = folders.optJSONObject(i);
-            choices[i] = folder == null ? "Folder" : folder.optString("name", "Folder");
-        }
-        if (withNew) choices[length] = "+ New folder";
-        return choices;
-    }
+    private static JSONObject makeSnapshot(Tweet tweet) {
+        try {
+            JSONObject post = new JSONObject();
+            String id = String.valueOf(tweet.getTweetId());
+            if (id.isEmpty() || "null".equals(id)) return null;
+            String username = tweet.getTweetUsername();
+            String displayName = tweet.getTweetProfileName();
+            String text = tweet.getText();
 
-    private static void chooseFolder(Context context, String id, String url, String label) {
-        JSONArray folders;
-        synchronized (LOCK) { folders = read(context); }
-        int count = folders.length();
-        new AlertDialog.Builder(context)
-                .setTitle("Save post to folder")
-                .setItems(names(folders, true), (dialog, which) -> {
-                    if (which == count) {
-                        promptNewFolder(context, () -> chooseFolder(context, id, url, label));
-                    } else {
-                        synchronized (LOCK) {
-                            JSONArray latest = read(context);
-                            JSONObject folder = latest.optJSONObject(which);
-                            if (folder == null) return;
-                            JSONArray posts = folder.optJSONArray("posts");
-                            if (posts == null) posts = new JSONArray();
-                            boolean exists = false;
-                            for (int i = 0; i < posts.length(); i++) {
-                                JSONObject post = posts.optJSONObject(i);
-                                if (post != null && id.equals(post.optString("id"))) {
-                                    exists = true;
-                                    break;
-                                }
+            if (username == null) username = "";
+            if (displayName == null || displayName.isEmpty()) displayName = username;
+            if (text == null) text = "";
+            post.put("id", id);
+            post.put("url", "https://x.com/" + username + "/status/" + id);
+            post.put("username", username);
+            post.put("displayName", displayName);
+            post.put("text", text);
+            post.put("label", "@" + username + " — " +
+                    (text.trim().isEmpty() ? "Post " + id : text.trim()));
+            post.put("savedAt", System.currentTimeMillis());
+            try {
+                ArrayList<ArrayList<Media>> media = tweet.getMediaList();
+                if (media != null) {
+                    for (ArrayList<Media> variants : media) {
+                        if (variants == null) continue;
+                        for (Media asset : variants) {
+                            if (asset != null && asset.url != null && asset.type == 0) {
+                                post.put("mediaUrl", asset.url);
+                                post.put("mediaType", "image");
+                                return post;
                             }
-                            if (!exists) {
-                                JSONObject post = new JSONObject();
-                                try {
-                                    post.put("id", id);
-                                    post.put("url", url);
-                                    post.put("label", label);
-                                    posts.put(post);
-                                    folder.put("posts", posts);
-                                    save(context, latest);
-                                } catch (Exception ignored) {
-                                    toast(context, "Could not save post");
-                                    return;
-                                }
-                            }
-                            toast(context, exists ? "Already in this folder" : "Saved to " + folder.optString("name"));
                         }
+                        if (!variants.isEmpty()) post.put("mediaType", "video");
                     }
-                })
-                .setNegativeButton("Cancel", null).show();
+                }
+            } catch (Exception ignored) {}
+            return post;
+        } catch (Exception exception) {
+            android.util.Log.w("PikoBookmarkFolders", "Could not snapshot post", exception);
+            return null;
+        }
+    }
+
+    private static void chooseFolder(Context context, JSONObject post) {
+        JSONArray folders = read(context);
+        BookmarkChrome ui = new BookmarkChrome(context);
+        BookmarkChrome.Sheet sheet = ui.sheet("Add to folder");
+        sheet.row(BookmarkChrome.PLUS, "Create new folder", null, false,
+                () -> promptNewFolder(context, () -> saveInNewestFolder(context, post)));
+        if (folders.length() > 0) sheet.separator();
+
+        for (int i = 0; i < folders.length(); i++) {
+            JSONObject folder = folders.optJSONObject(i);
+            if (folder == null) continue;
+            final String folderName = folder.optString("name", "");
+            if (folderName.isEmpty()) continue;
+            JSONArray posts = folder.optJSONArray("posts");
+            String subtitle = (posts == null ? 0 : posts.length()) + " posts";
+            sheet.row(BookmarkChrome.FOLDER, folderName, subtitle, false,
+                    () -> savePostTo(context, folderName, post));
+        }
+        sheet.note("Saved on this device. Your regular X bookmark remains unchanged.");
+        sheet.show();
+    }
+
+    private static void saveInNewestFolder(Context context, JSONObject post) {
+        synchronized (LOCK) {
+            JSONArray all = read(context);
+            JSONObject latest = all.optJSONObject(all.length() - 1);
+            if (latest == null) return;
+            savePostTo(context, latest.optString("name"), post);
+        }
+    }
+
+    static boolean savePostTo(Context context, String folderName, JSONObject post) {
+        synchronized (LOCK) {
+            JSONArray folders = read(context);
+            for (int i = 0; i < folders.length(); i++) {
+                JSONObject folder = folders.optJSONObject(i);
+                if (folder == null || !folderName.equals(folder.optString("name"))) continue;
+                JSONArray posts = folder.optJSONArray("posts");
+                if (posts == null) posts = new JSONArray();
+                String id = post.optString("id");
+                for (int p = 0; p < posts.length(); p++) {
+                    JSONObject existing = posts.optJSONObject(p);
+                    if (existing != null && id.equals(existing.optString("id"))) {
+                        notifyUser(context, "Already saved in " + folderName);
+                        return false;
+                    }
+                }
+                try {
+                    posts.put(new JSONObject(post.toString()));
+                    folder.put("posts", posts);
+                    save(context, folders);
+                    notifyUser(context, "Saved in " + folderName);
+                    return true;
+                } catch (Exception exception) {
+                    notifyUser(context, "Could not save post");
+                    return false;
+                }
+            }
+        }
+        notifyUser(context, "Folder no longer exists");
+        return false;
     }
 
     static void promptNewFolder(Context context, Runnable onCreated) {
-        EditText input = new EditText(context);
-        input.setSingleLine(true);
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-        input.setHint("Folder name");
-        input.setPadding(28, 20, 28, 20);
-        new AlertDialog.Builder(context)
-                .setTitle("New bookmark folder")
-                .setView(input)
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Create", (dialog, button) -> {
-                    String name = input.getText().toString().trim();
-                    if (name.isEmpty()) {
-                        toast(context, "Folder name cannot be empty");
-                        return;
-                    }
-                    synchronized (LOCK) {
-                        JSONArray folders = read(context);
-                        for (int i = 0; i < folders.length(); i++) {
-                            JSONObject existing = folders.optJSONObject(i);
-                            if (existing != null && name.equalsIgnoreCase(existing.optString("name"))) {
-                                toast(context, "Folder already exists");
-                                return;
-                            }
-                        }
-                        JSONObject folder = new JSONObject();
-                        try {
-                            folder.put("name", name);
-                            folder.put("posts", new JSONArray());
-                            folders.put(folder);
-                            save(context, folders);
-                        } catch (Exception exception) {
-                            toast(context, "Could not create folder");
-                            return;
-                        }
-                    }
-                    if (onCreated != null) onCreated.run();
-                }).show();
+        BookmarkChrome ui = new BookmarkChrome(context);
+        BookmarkChrome.Sheet sheet = ui.sheet("Create a folder");
+        EditText name = ui.input("Folder name", "");
+        name.setFilters(new android.text.InputFilter[]{
+                new android.text.InputFilter.LengthFilter(60)
+        });
+        name.setMinimumHeight(ui.dp(52));
+        sheet.custom(name, 20, 12);
+        sheet.button("Create", () -> {
+            String value = name.getText().toString().trim();
+            if (value.isEmpty()) {
+                notifyUser(context, "Enter a folder name");
+                return;
+            }
+            if (createFolder(context, value) && onCreated != null) onCreated.run();
+        }, false);
+        sheet.show();
+    }
+
+    private static boolean createFolder(Context context, String value) {
+        synchronized (LOCK) {
+            JSONArray folders = read(context);
+            for (int i = 0; i < folders.length(); i++) {
+                JSONObject folder = folders.optJSONObject(i);
+                if (folder != null && value.equalsIgnoreCase(folder.optString("name"))) {
+                    notifyUser(context, "Folder already exists");
+                    return false;
+                }
+            }
+            JSONObject folder = new JSONObject();
+            try {
+                folder.put("name", value);
+                folder.put("posts", new JSONArray());
+                folders.put(folder);
+                save(context, folders);
+                return true;
+            } catch (Exception exception) {
+                notifyUser(context, "Couldn't create folder");
+                return false;
+            }
+        }
     }
 
     public static void showFolders(Context context) {
-        JSONArray folders;
-        synchronized (LOCK) { folders = read(context); }
-        int size = folders.length();
-        String[] choices = new String[size + 1];
-        for (int i = 0; i < size; i++) {
+        JSONArray folders = read(context);
+        BookmarkChrome ui = new BookmarkChrome(context);
+        BookmarkChrome.Sheet sheet = ui.sheet("Bookmark folders");
+        sheet.row(BookmarkChrome.PLUS, "Create new folder", null, false,
+                () -> promptNewFolder(context, () -> showFolders(context)));
+        if (folders.length() > 0) sheet.separator();
+
+        for (int i = 0; i < folders.length(); i++) {
             JSONObject folder = folders.optJSONObject(i);
-            JSONArray posts = folder == null ? null : folder.optJSONArray("posts");
-            choices[i] = (folder == null ? "Folder" : folder.optString("name")) +
-                    "  (" + (posts == null ? 0 : posts.length()) + ")";
+            if (folder == null) continue;
+            final int index = i;
+            JSONArray posts = folder.optJSONArray("posts");
+            sheet.row(BookmarkChrome.FOLDER, folder.optString("name"),
+                    (posts == null ? 0 : posts.length()) + " posts", false,
+                    () -> showFolder(context, index));
         }
-        choices[size] = "+ New folder";
-        new AlertDialog.Builder(context)
-                .setTitle("Bookmark folders · on this device")
-                .setItems(choices, (dialog, which) -> {
-                    if (which == size) promptNewFolder(context, () -> showFolders(context));
-                    else showFolder(context, which);
-                })
-                .setNegativeButton("Close", null).show();
+        sheet.note("Folders are private to this device and do not sync with X.");
+        sheet.show();
     }
 
     private static void showFolder(Context context, int index) {
-        JSONArray folders;
-        synchronized (LOCK) { folders = read(context); }
+        JSONArray folders = read(context);
         JSONObject folder = folders.optJSONObject(index);
         if (folder == null) { showFolders(context); return; }
         JSONArray posts = folder.optJSONArray("posts");
-        if (posts == null) posts = new JSONArray();
-        final String[] items = new String[posts.length()];
-        for (int i = 0; i < posts.length(); i++) {
-            JSONObject post = posts.optJSONObject(i);
-            String label = post == null ? "Post" : post.optString("label", "Post");
-            items[i] = label.length() > 100 ? label.substring(0, 100) + "…" : label;
+        BookmarkChrome ui = new BookmarkChrome(context);
+        BookmarkChrome.Sheet sheet = ui.sheet(folder.optString("name"));
+        sheet.row(BookmarkChrome.MORE, "Manage folder", null, false,
+                () -> manageFolder(context, index, () -> showFolders(context)));
+        if (posts == null || posts.length() == 0) {
+            sheet.note("There are no posts in this folder yet.");
+        } else {
+            sheet.separator();
+            for (int i = posts.length() - 1; i >= 0; i--) {
+                JSONObject post = posts.optJSONObject(i);
+                if (post == null) continue;
+                final int postIndex = i;
+                sheet.row(BookmarkChrome.BOOKMARK,
+                        post.optString("label", "Saved post"), null, false,
+                        () -> showPost(context, index, postIndex, () -> showFolder(context, index)));
+            }
         }
-        new AlertDialog.Builder(context)
-                .setTitle(folder.optString("name"))
-                .setItems(items, (dialog, which) -> showPost(context, index, which))
-                .setNeutralButton("Manage", (dialog, which) -> manageFolder(context, index))
-                .setNegativeButton("Folders", (dialog, which) -> showFolders(context))
-                .show();
-    }
-
-    private static void showPost(Context context, int folderIndex, int postIndex) {
-        showPost(context, folderIndex, postIndex, null);
+        sheet.show();
     }
 
     static void showPost(Context context, int folderIndex, int postIndex, Runnable onChanged) {
@@ -253,80 +300,170 @@ public final class BookmarkFolders {
         JSONArray posts = folder == null ? null : folder.optJSONArray("posts");
         JSONObject post = posts == null ? null : posts.optJSONObject(postIndex);
         if (post == null) return;
-        new AlertDialog.Builder(context)
-                .setTitle(post.optString("label", "Saved post"))
-                .setItems(new String[]{"Open post", "Remove from folder"}, (dialog, which) -> {
-                    if (which == 0) {
-                        try {
-                            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(post.optString("url")));
-                            context.startActivity(intent);
-                        } catch (Exception exception) {
-                            toast(context, "Could not open post");
-                        }
-                    } else {
-                        synchronized (LOCK) {
-                            JSONArray current = read(context);
-                            JSONObject currentFolder = current.optJSONObject(folderIndex);
-                            JSONArray oldPosts = currentFolder == null ? null : currentFolder.optJSONArray("posts");
-                            if (oldPosts != null && postIndex < oldPosts.length()) {
-                                oldPosts.remove(postIndex);
-                                save(context, current);
-                            }
-                        }
-                        if (onChanged != null) onChanged.run();
-                        else showFolder(context, folderIndex);
-                    }
-                }).setNegativeButton("Cancel", (dialog, which) -> {
-                    if (onChanged != null) onChanged.run();
-                    else showFolder(context, folderIndex);
-                })
-                .show();
+
+        BookmarkChrome.Sheet sheet = new BookmarkChrome(context).sheet("Saved post");
+        sheet.row(BookmarkChrome.BOOKMARK, "Open post", null, false,
+                () -> openPost(context, post));
+        sheet.row(BookmarkChrome.FOLDER, "Move to folder", null, false,
+                () -> chooseMoveFolder(context, folderIndex, postIndex, onChanged));
+        sheet.row(BookmarkChrome.TRASH, "Remove from folder", null, true,
+                () -> {
+                    if (removeFromFolder(context, folderIndex, postIndex) && onChanged != null)
+                        onChanged.run();
+                });
+        sheet.show();
     }
 
-    private static void manageFolder(Context context, int folderIndex) {
-        manageFolder(context, folderIndex, () -> showFolders(context));
+    static void openPost(Context context, JSONObject post) {
+        String url = post.optString("url", "");
+        if (url.isEmpty()) return;
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            intent.setPackage(context.getPackageName());
+            context.startActivity(intent);
+        } catch (Exception first) {
+            try {
+                context.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            } catch (Exception second) {
+                notifyUser(context, "Could not open post");
+            }
+        }
     }
 
-    static void manageFolder(Context context, int folderIndex, Runnable onChanged) {
+    private static boolean removeFromFolder(Context context, int folderIndex, int postIndex) {
+        synchronized (LOCK) {
+            JSONArray folders = read(context);
+            JSONObject folder = folders.optJSONObject(folderIndex);
+            JSONArray posts = folder == null ? null : folder.optJSONArray("posts");
+            if (posts == null || postIndex < 0 || postIndex >= posts.length()) return false;
+            posts.remove(postIndex);
+            save(context, folders);
+            notifyUser(context, "Removed from folder");
+            return true;
+        }
+    }
+
+    private static void chooseMoveFolder(Context context, int fromIndex, int postIndex, Runnable onChanged) {
         JSONArray folders = read(context);
-        JSONObject folder = folders.optJSONObject(folderIndex);
+        BookmarkChrome.Sheet sheet = new BookmarkChrome(context).sheet("Move to folder");
+        sheet.row(BookmarkChrome.PLUS, "Create new folder", null, false,
+                () -> promptNewFolder(context, () -> {
+                    JSONArray now = read(context);
+                    if (now.length() > 0) movePost(context, fromIndex, postIndex,
+                            now.length() - 1, onChanged);
+                }));
+        for (int i = 0; i < folders.length(); i++) {
+            if (i == fromIndex) continue;
+            JSONObject folder = folders.optJSONObject(i);
+            if (folder == null) continue;
+            final int toIndex = i;
+            sheet.row(BookmarkChrome.FOLDER, folder.optString("name"),
+                    null, false,
+                    () -> movePost(context, fromIndex, postIndex, toIndex, onChanged));
+        }
+        sheet.show();
+    }
+
+    private static void movePost(Context context, int fromIndex, int postIndex,
+                                 int toIndex, Runnable onChanged) {
+        synchronized (LOCK) {
+            JSONArray folders = read(context);
+            JSONObject source = folders.optJSONObject(fromIndex);
+            JSONObject target = folders.optJSONObject(toIndex);
+            if (source == null || target == null || source == target) return;
+            JSONArray from = source.optJSONArray("posts");
+            JSONArray to = target.optJSONArray("posts");
+            if (from == null || postIndex >= from.length()) return;
+            JSONObject post = from.optJSONObject(postIndex);
+            if (post == null) return;
+            if (to == null) to = new JSONArray();
+            boolean alreadyExists = false;
+            for (int i = 0; i < to.length(); i++) {
+                JSONObject p = to.optJSONObject(i);
+                if (p != null && post.optString("id").equals(p.optString("id"))) {
+                    alreadyExists = true;
+                    break;
+                }
+            }
+            if (!alreadyExists) to.put(post);
+            from.remove(postIndex);
+            try { target.put("posts", to); }
+            catch (Exception ignored) { return; }
+            save(context, folders);
+            notifyUser(context, "Moved to " + target.optString("name"));
+        }
+        if (onChanged != null) onChanged.run();
+    }
+
+    static void manageFolder(Context context, int index, Runnable onChanged) {
+        JSONArray folders = read(context);
+        JSONObject folder = folders.optJSONObject(index);
         if (folder == null) return;
-        new AlertDialog.Builder(context).setTitle(folder.optString("name"))
-                .setItems(new String[]{"Rename folder", "Delete folder"}, (dialog, which) -> {
-                    if (which == 0) {
-                        EditText input = new EditText(context);
-                        input.setSingleLine(true);
-                        input.setText(folder.optString("name"));
-                        new AlertDialog.Builder(context).setTitle("Rename folder").setView(input)
-                                .setNegativeButton("Cancel", null)
-                                .setPositiveButton("Save", (d, b) -> {
-                                    String newName = input.getText().toString().trim();
-                                    if (newName.isEmpty()) return;
-                                    synchronized (LOCK) {
-                                        JSONArray current = read(context);
-                                        JSONObject target = current.optJSONObject(folderIndex);
-                                        if (target == null) return;
-                                        try { target.put("name", newName); save(context, current); }
-                                        catch (Exception ignored) { toast(context, "Rename failed"); }
-                                    }
-                                    if (onChanged != null) onChanged.run();
-                                }).show();
-                    } else {
-                        new AlertDialog.Builder(context)
-                                .setTitle("Delete folder?")
-                                .setMessage("This removes its locally saved links, not your X bookmarks.")
-                                .setNegativeButton("Cancel", null)
-                                .setPositiveButton("Delete", (d, b) -> {
-                                    synchronized (LOCK) {
-                                        JSONArray current = read(context);
-                                        if (folderIndex < current.length()) {
-                                            current.remove(folderIndex);
-                                            save(context, current);
-                                        }
-                                    }
-                                    if (onChanged != null) onChanged.run();
-                                }).show();
+        BookmarkChrome.Sheet sheet = new BookmarkChrome(context)
+                .sheet(folder.optString("name"));
+        sheet.row(BookmarkChrome.MORE, "Rename folder", null, false, () -> {
+            renameFolder(context, index, onChanged);
+        });
+        sheet.row(BookmarkChrome.TRASH, "Delete folder", null, true, () -> {
+            confirmDelete(context, index, onChanged);
+        });
+        sheet.show();
+    }
+
+    private static void renameFolder(Context context, int index, Runnable onChanged) {
+        JSONObject folder = read(context).optJSONObject(index);
+        if (folder == null) return;
+        BookmarkChrome ui = new BookmarkChrome(context);
+        BookmarkChrome.Sheet sheet = ui.sheet("Rename folder");
+        EditText input = ui.input("Folder name", folder.optString("name"));
+        input.setMinimumHeight(ui.dp(52));
+        sheet.custom(input, 20, 12);
+        sheet.button("Save", () -> {
+            String value = input.getText().toString().trim();
+            if (value.isEmpty()) { notifyUser(context, "Enter a name"); return; }
+            synchronized (LOCK) {
+                JSONArray all = read(context);
+                for (int i = 0; i < all.length(); i++) {
+                    JSONObject other = all.optJSONObject(i);
+                    if (i != index && other != null &&
+                            value.equalsIgnoreCase(other.optString("name"))) {
+                        notifyUser(context, "Folder already exists");
+                        return;
                     }
-                }).setNegativeButton("Cancel", null).show();
+                }
+                JSONObject target = all.optJSONObject(index);
+                if (target == null) return;
+                try { target.put("name", value); save(context, all); }
+                catch (Exception exception) { notifyUser(context, "Rename failed"); return; }
+            }
+            if (onChanged != null) onChanged.run();
+        }, false);
+        sheet.show();
+    }
+
+    private static void confirmDelete(Context context, int index, Runnable onChanged) {
+        BookmarkChrome.Sheet sheet = new BookmarkChrome(context)
+                .sheet("Delete folder?");
+        sheet.note("The posts in this local folder will be removed from the folder. Your X bookmarks won't be deleted.");
+        sheet.button("Delete folder", () -> {
+            synchronized (LOCK) {
+                JSONArray folders = read(context);
+                if (index >= 0 && index < folders.length()) {
+                    folders.remove(index);
+                    save(context, folders);
+                }
+            }
+            if (onChanged != null) onChanged.run();
+        }, true);
+        sheet.show();
+    }
+
+    // Backward-compatible entrypoints for Piko's existing settings and folder UI.
+    static void showPost(Context context, int folderIndex, int postIndex) {
+        showPost(context, folderIndex, postIndex, null);
+    }
+
+    static void manageFolder(Context context, int index) {
+        manageFolder(context, index, () -> showFolders(context));
     }
 }
