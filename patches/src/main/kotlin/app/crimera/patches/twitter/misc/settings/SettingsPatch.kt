@@ -16,6 +16,7 @@ import app.crimera.patches.twitter.utils.Constants.ACTIVITY_SETTINGS_CLASS
 import app.crimera.patches.twitter.utils.Constants.DEEPLINK_HOOK_CLASS
 import app.crimera.patches.twitter.utils.Constants.SSTS_DESCRIPTOR
 import app.crimera.patches.twitter.utils.Constants.UTILS_DESCRIPTOR
+import app.morphe.patcher.Fingerprint
 import app.morphe.patcher.extensions.InstructionExtensions.addInstruction
 import app.morphe.patcher.extensions.InstructionExtensions.addInstructions
 import app.morphe.patcher.extensions.InstructionExtensions.addInstructionsWithLabels
@@ -40,6 +41,16 @@ import com.android.tools.smali.dexlib2.iface.instruction.FiveRegisterInstruction
 import com.android.tools.smali.dexlib2.iface.instruction.OneRegisterInstruction
 import com.android.tools.smali.dexlib2.iface.instruction.TwoRegisterInstruction
 import com.android.tools.smali.dexlib2.iface.reference.MethodReference
+
+// X native timeline response parser, also used by the optional verified filter.
+// Replacing only Bookmarks' entries preserves the app's native tweet renderer.
+private object BookmarkJacksonInputStreamFingerprint : Fingerprint(
+    definingClass = "/fasterxml/jackson/core/",
+    parameters = listOf("Ljava/io/InputStream"),
+    custom = { methodDef, _ ->
+        methodDef.returnType.contains("/fasterxml/jackson/core/")
+    },
+)
 
 private const val SETTINGS_SEARCH_UI_CONTROLLER_CLASS =
     "$ACTIVITY_SETTINGS_CLASS/SettingsSearchUIController;"
@@ -223,6 +234,17 @@ val settingsPatch =
                 0,
                 "$SSTS_DESCRIPTOR->load()V",
             )
+            // Native folder filtering is always available when Piko settings are patched.
+            // It is a no-op until a folder is opened, and then only rewrites
+            // X's bookmark_timeline_v2 JSON, never other feeds.
+            BookmarkJacksonInputStreamFingerprint.method.addInstructions(
+                0,
+                """
+                invoke-static {p1}, Lapp/morphe/extension/twitter/patches/bookmarks/BookmarkNativeTimeline;->filter(Ljava/io/InputStream;)Ljava/io/InputStream;
+                move-result-object p1
+                """.trimIndent(),
+            )
+
             // Inject the two-tab folder UI into X's legacy BookmarkActivity.
             twitterInitHook.fingerprint.method.addInstruction(
                 0,
