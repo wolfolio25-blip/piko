@@ -37,6 +37,18 @@ import android.widget.TextView;
 final class BookmarkChrome {
     static final int BLUE = 0xFF1D9BF0;
     static final int RED = 0xFFF4212E;
+    private static volatile Typeface xFont;
+
+    static void captureNativeFont(Typeface font) {
+        if (font != null) xFont = Typeface.create(font, Typeface.NORMAL);
+    }
+
+    static Typeface typeface(boolean bold) {
+        Typeface font = xFont;
+        return font == null ? (bold ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT)
+                : Typeface.create(font, bold ? Typeface.BOLD : Typeface.NORMAL);
+    }
+
 
     static final int FOLDER = 1;
     static final int PLUS = 2;
@@ -85,7 +97,7 @@ final class BookmarkChrome {
         tv.setTextColor(color);
         tv.setGravity(Gravity.CENTER_VERTICAL);
         tv.setIncludeFontPadding(false);
-        if (bold) tv.setTypeface(Typeface.DEFAULT_BOLD);
+        tv.setTypeface(typeface(bold));
         return tv;
     }
 
