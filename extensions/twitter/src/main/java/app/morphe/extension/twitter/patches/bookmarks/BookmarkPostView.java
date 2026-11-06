@@ -77,13 +77,13 @@ final class BookmarkPostView {
         displayName.setEllipsize(android.text.TextUtils.TruncateAt.END);
         header.addView(displayName, new LinearLayout.LayoutParams(0, -2, 1f));
 
-        TextView actions = theme.text("···", 24, false, theme.secondary);
-        actions.setGravity(Gravity.CENTER);
+        ImageView actions = theme.icon(BookmarkChrome.MORE, theme.secondary, 22);
         actions.setContentDescription("Post options");
         LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(
                 theme.dp(38), theme.dp(34));
         actionParams.leftMargin = theme.dp(8);
         header.addView(actions, actionParams);
+        actions.setPadding(theme.dp(8), theme.dp(6), theme.dp(8), theme.dp(6));
         actions.setBackground(theme.ripple());
         actions.setOnClickListener(v -> { if (onActions != null) onActions.run(); });
 
