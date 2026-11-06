@@ -92,6 +92,9 @@ public class TimelineEntry {
     public static JsonTimelineEntry checkEntry(JsonTimelineEntry jsonTimelineEntry) {
         try {
             String entryId = jsonTimelineEntry.a;
+            if (!app.morphe.extension.twitter.patches.bookmarks.BookmarkNativeTimeline.keepNativeEntryId(entryId)) {
+                return null;
+            }
             if (isEntryIdRemove(entryId)) {
                 return null;
             }
@@ -102,6 +105,9 @@ public class TimelineEntry {
     public static JsonTimelineModuleItem checkEntry(JsonTimelineModuleItem jsonTimelineModuleItem) {
         try {
             String entryId = jsonTimelineModuleItem.a;
+            if (!app.morphe.extension.twitter.patches.bookmarks.BookmarkNativeTimeline.keepNativeEntryId(entryId)) {
+                return null;
+            }
             if (isEntryIdRemove(entryId)) {
                 return null;
             }
