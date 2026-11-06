@@ -46,7 +46,11 @@ public final class BookmarkTabs {
         registered = true;
         BookmarkButtonObserver.install(application);
         application.registerActivityLifecycleCallbacks(new Application.ActivityLifecycleCallbacks() {
-            @Override public void onActivityCreated(Activity a, Bundle s) {}
+            @Override public void onActivityCreated(Activity a, Bundle s) {
+                if (BOOKMARK_ACTIVITY.equals(a.getClass().getName())) {
+                    BookmarkNativeTimeline.setBookmarkScreenVisible(true);
+                }
+            }
             @Override public void onActivityStarted(Activity a) {}
             @Override public void onActivityResumed(Activity a) {
                 if (BOOKMARK_ACTIVITY.equals(a.getClass().getName())) {
