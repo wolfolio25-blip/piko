@@ -10,6 +10,7 @@ import app.crimera.utils.InitMethod
 import app.crimera.patches.twitter.misc.crashLogs.crashLogsPatch
 import app.crimera.patches.twitter.misc.extension.sharedExtensionPatch
 import app.crimera.patches.twitter.misc.extension.twitterInitHook
+import app.crimera.patches.twitter.ads.timelineEntryHook.timelineEntryHookPatch
 import app.crimera.patches.twitter.premium.redirectBMNavBar.redirectBMTab
 import app.crimera.patches.twitter.utils.Constants.ACTIVITY_HOOK_CLASS
 import app.crimera.patches.twitter.utils.Constants.ACTIVITY_SETTINGS_CLASS
@@ -64,6 +65,7 @@ val settingsPatch =
             sharedExtensionPatch,
             settingsResourcePatch,
             redirectBMTab,
+            timelineEntryHookPatch,
             addResourcesPatch,
             crashLogsPatch,
         )
