@@ -413,9 +413,10 @@ public final class BookmarkTabs {
                         14, false, secondary), subtitleParams);
                 item.addView(labels, new LinearLayout.LayoutParams(0, -2, 1f));
 
-                TextView menu = ui.text("···", 25, false, secondary);
-                menu.setGravity(Gravity.CENTER);
+                android.widget.ImageView menu =
+                        ui.icon(BookmarkChrome.MORE, secondary, 22);
                 menu.setContentDescription("Folder options");
+                menu.setPadding(ui.dp(10), ui.dp(9), ui.dp(10), ui.dp(9));
                 menu.setBackground(ui.ripple());
                 item.addView(menu, new LinearLayout.LayoutParams(ui.dp(42), ui.dp(42)));
                 menu.setOnClickListener(v ->
