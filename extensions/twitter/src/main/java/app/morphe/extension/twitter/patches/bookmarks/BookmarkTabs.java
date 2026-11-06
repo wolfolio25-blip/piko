@@ -56,7 +56,13 @@ public final class BookmarkTabs {
             @Override public void onActivityPaused(Activity a) {}
             @Override public void onActivityStopped(Activity a) {}
             @Override public void onActivitySaveInstanceState(Activity a, Bundle s) {}
-            @Override public void onActivityDestroyed(Activity a) { INSTALLED.remove(a); }
+            @Override public void onActivityDestroyed(Activity a) {
+                INSTALLED.remove(a);
+                if (BOOKMARK_ACTIVITY.equals(a.getClass().getName())
+                        && a.isFinishing() && !a.isChangingConfigurations()) {
+                    BookmarkNativeTimeline.clearFolder();
+                }
+            }
         });
     }
 
@@ -122,7 +128,8 @@ public final class BookmarkTabs {
                 page.originalView.addView(child, frameParams);
             }
             INSTALLED.put(activity, page);
-            page.switchTo(false);
+            if (BookmarkNativeTimeline.isFiltering()) page.showSelectedFolder();
+            else page.switchTo(false);
             page.shell.post(page::positionControls);
         } catch (Exception exception) {
             // Restore the original children if a vendor-specific layout rejects wrapping.
@@ -151,8 +158,12 @@ public final class BookmarkTabs {
         final FrameLayout originalView;
         final LinearLayout tabBar;
         final View tabDivider;
+        final LinearLayout folderHeader;
+        final TextView folderHeaderTitle;
         private View adjustedList;
         private int listPaddingTop;
+        private boolean folderTimelineVisible;
+        private boolean nativeListWasFiltered;
         final ScrollView foldersView;
         final TextView allTab;
         final TextView foldersTab;
@@ -208,6 +219,25 @@ public final class BookmarkTabs {
             tabDivider.setBackgroundColor(isDark ? 0xFF2F3336 : 0xFFEFF3F4);
             shell.addView(tabDivider, new FrameLayout.LayoutParams(-1, dp(activity, 1)));
             tabDivider.setElevation(dp(activity, 4));
+
+            // Folder header is visible only while X's REAL bookmark timeline
+            // is displaying a single local collection.
+            BookmarkChrome ui = new BookmarkChrome(activity);
+            folderHeader = ui.row();
+            folderHeader.setBackgroundColor(background);
+            folderHeader.setPadding(ui.dp(16), 0, ui.dp(16), 0);
+            folderHeader.setElevation(dp(activity, 3));
+            android.widget.ImageView back = ui.icon(BookmarkChrome.BACK, primary, 23);
+            LinearLayout.LayoutParams backParams =
+                    new LinearLayout.LayoutParams(ui.dp(23), ui.dp(23));
+            backParams.rightMargin = ui.dp(14);
+            folderHeader.addView(back, backParams);
+            folderHeaderTitle = ui.text("", 17, true, primary);
+            folderHeader.addView(folderHeaderTitle,
+                    new LinearLayout.LayoutParams(0, -2, 1f));
+            folderHeader.setOnClickListener(v -> switchTo(true));
+            folderHeader.setVisibility(View.GONE);
+            shell.addView(folderHeader, new FrameLayout.LayoutParams(-1, ui.dp(54)));
             tabBar.bringToFront();
         }
 
@@ -244,6 +274,10 @@ public final class BookmarkTabs {
                     new FrameLayout.LayoutParams(-1, dp(activity, 1));
             lineParams.topMargin = top + dp(activity, 52);
             tabDivider.setLayoutParams(lineParams);
+            FrameLayout.LayoutParams headerParams =
+                    new FrameLayout.LayoutParams(-1, dp(activity, 54));
+            headerParams.topMargin = top + dp(activity, 53);
+            folderHeader.setLayoutParams(headerParams);
             FrameLayout.LayoutParams foldersParams = new FrameLayout.LayoutParams(-1, -1);
             foldersParams.topMargin = top + dp(activity, 53);
             foldersView.setLayoutParams(foldersParams);
@@ -255,10 +289,20 @@ public final class BookmarkTabs {
                 if (list != null) {
                     adjustedList = list;
                     listPaddingTop = list.getPaddingTop();
-                    list.setPadding(list.getPaddingLeft(), listPaddingTop + dp(activity, 53),
-                            list.getPaddingRight(), list.getPaddingBottom());
+                    applyNativeListPadding();
                     if (list instanceof ViewGroup) ((ViewGroup) list).setClipToPadding(false);
                 }
+            }
+            applyNativeListPadding();
+        }
+
+        private void applyNativeListPadding() {
+            if (adjustedList != null) {
+                int additional = folderTimelineVisible ? 107 : 53;
+                adjustedList.setPadding(adjustedList.getPaddingLeft(),
+                        listPaddingTop + dp(activity, additional),
+                        adjustedList.getPaddingRight(),
+                        adjustedList.getPaddingBottom());
             }
         }
 
@@ -332,14 +376,46 @@ public final class BookmarkTabs {
         }
 
         void switchTo(boolean folders) {
-            // Keep the native header visible on both tabs; cover only the post list.
+            if (!folders && nativeListWasFiltered) {
+                // Recreate the native X Bookmarks timeline from its unfiltered
+                // server-backed data; do not reuse its filtered adapter.
+                BookmarkNativeTimeline.clearFolder();
+                activity.recreate();
+                return;
+            }
+            if (folders && folderTimelineVisible) {
+                BookmarkNativeTimeline.clearFolder();
+                folderTimelineVisible = false;
+                // The underlying native list was built for the old folder;
+                // re-create it when the user switches to All Tweets.
+                nativeListWasFiltered = true;
+            }
             originalView.setVisibility(View.VISIBLE);
             foldersView.setVisibility(folders ? View.VISIBLE : View.GONE);
+            folderHeader.setVisibility(View.GONE);
             allTab.setTextColor(folders ? secondary : primary);
             foldersTab.setTextColor(folders ? primary : secondary);
             allIndicator.setVisibility(folders ? View.INVISIBLE : View.VISIBLE);
             foldersIndicator.setVisibility(folders ? View.VISIBLE : View.INVISIBLE);
+            applyNativeListPadding();
             if (folders) populateFolders();
+        }
+
+        /** Existing native X timeline, filtered at the response level. */
+        void showSelectedFolder() {
+            String folder = BookmarkNativeTimeline.selectedFolder();
+            if (folder == null) { switchTo(false); return; }
+            folderTimelineVisible = true;
+            nativeListWasFiltered = true;
+            folderHeaderTitle.setText(folder);
+            folderHeader.setVisibility(View.VISIBLE);
+            foldersView.setVisibility(View.GONE);
+            originalView.setVisibility(View.VISIBLE);
+            allTab.setTextColor(secondary);
+            foldersTab.setTextColor(primary);
+            allIndicator.setVisibility(View.INVISIBLE);
+            foldersIndicator.setVisibility(View.VISIBLE);
+            applyNativeListPadding();
         }
 
         /** Flat folder rows, no Android cards, icons, emoji or stock controls. */
@@ -447,78 +523,12 @@ public final class BookmarkTabs {
             JSONObject folder = folders.optJSONObject(folderIndex);
             if (folder == null) { populateFolders(); return; }
 
-            BookmarkChrome ui = new BookmarkChrome(activity);
-            LinearLayout list = ui.column();
-            foldersView.removeAllViews();
-            foldersView.addView(list, new ScrollView.LayoutParams(-1, -2));
-
-            LinearLayout backRow = ui.row();
-            backRow.setPadding(ui.dp(16), 0, ui.dp(16), 0);
-            backRow.setMinimumHeight(ui.dp(54));
-            backRow.setBackground(ui.ripple());
-            LinearLayout.LayoutParams arrowParams =
-                    new LinearLayout.LayoutParams(ui.dp(22), ui.dp(22));
-            arrowParams.rightMargin = ui.dp(14);
-            backRow.addView(ui.icon(BookmarkChrome.BACK, primary, 22), arrowParams);
-            TextView name = ui.text(folder.optString("name", "Folder"), 19, true, primary);
-            backRow.addView(name, new LinearLayout.LayoutParams(0, -2, 1f));
-            backRow.setOnClickListener(v -> populateFolders());
-            list.addView(backRow, new LinearLayout.LayoutParams(-1, ui.dp(56)));
-            list.addView(ui.divider());
-
-            android.widget.EditText search = ui.input("Search saved posts", "");
-            LinearLayout.LayoutParams searchParams =
-                    new LinearLayout.LayoutParams(-1, ui.dp(44));
-            searchParams.setMargins(ui.dp(16), ui.dp(14), ui.dp(16), ui.dp(12));
-            list.addView(search, searchParams);
-
-            LinearLayout rows = ui.column();
-            list.addView(rows, new LinearLayout.LayoutParams(-1, -2));
-            Runnable render = () -> drawSavedPosts(ui, rows, folderIndex,
-                    search.getText().toString().trim().toLowerCase(java.util.Locale.ROOT));
-            search.addTextChangedListener(new android.text.TextWatcher() {
-                @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-                @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
-                    render.run();
-                }
-                @Override public void afterTextChanged(android.text.Editable text) {}
-            });
-            render.run();
-        }
-
-        /** Render saved snapshots with X-like tweet rows and real image previews. */
-        private void drawSavedPosts(BookmarkChrome ui, LinearLayout rows,
-                                    int folderIndex, String query) {
-            rows.removeAllViews();
-            JSONArray folders = BookmarkFolders.read(activity);
-            JSONObject folder = folders.optJSONObject(folderIndex);
-            JSONArray posts = folder == null ? null : folder.optJSONArray("posts");
-            int matched = 0;
-            if (posts != null) {
-                for (int i = posts.length() - 1; i >= 0; i--) {
-                    JSONObject post = posts.optJSONObject(i);
-                    if (post == null) continue;
-                    String searchable = (post.optString("text") + " " +
-                            post.optString("label") + " " + post.optString("username"))
-                            .toLowerCase(java.util.Locale.ROOT);
-                    if (!searchable.contains(query)) continue;
-                    matched++;
-                    int postIndex = i;
-                    rows.addView(BookmarkPostView.build(activity, post, () ->
-                            BookmarkFolders.showPost(activity, folderIndex,
-                                    postIndex, () -> showPosts(folderIndex))),
-                            new LinearLayout.LayoutParams(-1, -2));
-                    rows.addView(ui.divider());
-                }
-            }
-            if (matched == 0) {
-                TextView empty = ui.text(
-                        query.isEmpty() ? "No posts in this folder yet" : "No matching posts",
-                        15, false, secondary);
-                empty.setGravity(Gravity.CENTER);
-                empty.setPadding(ui.dp(30), ui.dp(54), ui.dp(30), ui.dp(30));
-                rows.addView(empty, new LinearLayout.LayoutParams(-1, -2));
-            }
+            // A native timeline is the only tweet renderer for folder contents.
+            // Select saved IDs, then recreate X's Bookmarks Activity to load the
+            // same feed and adapter it uses for All Tweets.
+            BookmarkNativeTimeline.selectFolder(
+                    activity, folder.optString("name", ""));
+            activity.recreate();
         }
 
     }
