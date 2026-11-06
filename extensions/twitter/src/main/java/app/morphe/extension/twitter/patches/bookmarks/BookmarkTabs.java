@@ -50,10 +50,15 @@ public final class BookmarkTabs {
             @Override public void onActivityStarted(Activity a) {}
             @Override public void onActivityResumed(Activity a) {
                 if (BOOKMARK_ACTIVITY.equals(a.getClass().getName())) {
+                    BookmarkNativeTimeline.setBookmarkScreenVisible(true);
                     a.getWindow().getDecorView().post(() -> attach(a));
                 }
             }
-            @Override public void onActivityPaused(Activity a) {}
+            @Override public void onActivityPaused(Activity a) {
+                if (BOOKMARK_ACTIVITY.equals(a.getClass().getName())) {
+                    BookmarkNativeTimeline.setBookmarkScreenVisible(false);
+                }
+            }
             @Override public void onActivityStopped(Activity a) {}
             @Override public void onActivitySaveInstanceState(Activity a, Bundle s) {}
             @Override public void onActivityDestroyed(Activity a) {
