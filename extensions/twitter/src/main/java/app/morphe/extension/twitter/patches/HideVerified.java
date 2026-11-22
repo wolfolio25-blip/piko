@@ -95,7 +95,10 @@ public final class HideVerified {
                 else {
                     target = firstObject(home, "home_timeline_urt", "home_timeline_v2",
                             "home_timeline");
-                    if (target != null) feed = Feed.FOR_YOU;
+                    if (target != null) {
+                        feed = HomeTabTracker.current() == HomeTabTracker.FOLLOWING
+                                ? Feed.FOLLOWING : Feed.FOR_YOU;
+                    }
                 }
             }
             if (feed == null) {
