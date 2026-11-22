@@ -11,13 +11,11 @@ import app.crimera.patches.twitter.utils.Constants.PATCHES_DESCRIPTOR
 import app.morphe.patcher.Fingerprint
 import app.morphe.patcher.InstructionLocation
 import app.morphe.patcher.extensions.InstructionExtensions.addInstructions
-import app.morphe.patcher.extensions.InstructionExtensions.addInstructionsWithLabels
 import app.morphe.patcher.extensions.InstructionExtensions.getInstruction
 import app.morphe.patcher.methodCall
 import app.morphe.patcher.patch.PatchException
 import app.morphe.patcher.patch.bytecodePatch
 import app.morphe.patcher.string
-import app.morphe.util.findFreeRegister
 import com.android.tools.smali.dexlib2.iface.instruction.OneRegisterInstruction
 import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
 import com.android.tools.smali.dexlib2.iface.reference.StringReference
@@ -84,40 +82,28 @@ val spoofClientVersionPatch =
 
             LegacyClientHeaderBuilderFingerprint.let { fingerprint ->
                 fingerprint.method.apply {
-                    // Insert from last matching instruction towards first to keep indexes stable.
+                    // The target X header method has no spare registers.
+                    // Reuse the registers that already contain each header's String.
+                    // The extension checks the URI (p1) and preserves non-XChat headers.
+                    // Insert from the later match to the earlier match to keep indices stable.
                     val versionIndex = fingerprint.instructionMatches.last().index
-                    val isXChatRegister = findFreeRegister(versionIndex + 1)
                     val versionRegister = fingerprint.instructionMatches.last()
                         .getInstruction<OneRegisterInstruction>().registerA
-
-                    addInstructionsWithLabels(
+                    addInstructions(
                         versionIndex + 1,
                         """
-                        if-eqz v$isXChatRegister, :keep_original_xchat_version
-                        const-string v$versionRegister, "$REPORTED_VERSION"
-                        :keep_original_xchat_version
-                        nop
+                        invoke-static {v$versionRegister, p1}, $EXTENSION_CLASS_DESCRIPTOR->clientVersion(Ljava/lang/String;Ljava/net/URI;)Ljava/lang/String;
+                        move-result-object v$versionRegister
                         """.trimIndent(),
                     )
 
                     val agentResultIndex = fingerprint.instructionMatches[1].index + 1
                     val agentRegister = getInstruction<OneRegisterInstruction>(agentResultIndex).registerA
-                    addInstructionsWithLabels(
+                    addInstructions(
                         agentResultIndex + 1,
                         """
-                        if-eqz v$isXChatRegister, :keep_original_xchat_agent
-                        invoke-static {v$agentRegister}, $EXTENSION_CLASS_DESCRIPTOR->userAgent(Ljava/lang/String;)Ljava/lang/String;
+                        invoke-static {v$agentRegister, p1}, $EXTENSION_CLASS_DESCRIPTOR->userAgentIfXChat(Ljava/lang/String;Ljava/net/URI;)Ljava/lang/String;
                         move-result-object v$agentRegister
-                        :keep_original_xchat_agent
-                        nop
-                        """.trimIndent(),
-                    )
-
-                    addInstructions(
-                        0,
-                        """
-                        invoke-static {p1}, $EXTENSION_CLASS_DESCRIPTOR->isXChatRequest(Ljava/net/URI;)Z
-                        move-result v$isXChatRegister
                         """.trimIndent(),
                     )
                 }
