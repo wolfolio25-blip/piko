@@ -186,11 +186,11 @@ final class BookmarkChrome {
                     new LinearLayout.LayoutParams(chrome.dp(36), chrome.dp(4));
             handleParams.gravity = Gravity.CENTER_HORIZONTAL;
             handleParams.topMargin = chrome.dp(10);
-            handleParams.bottomMargin = chrome.dp(18);
+            handleParams.bottomMargin = chrome.dp(10);
             surface.addView(handle, handleParams);
 
             TextView heading = chrome.text(title, 20, true, chrome.text);
-            heading.setPadding(chrome.dp(20), 0, chrome.dp(20), chrome.dp(16));
+            heading.setPadding(chrome.dp(20), 0, chrome.dp(20), chrome.dp(10));
             surface.addView(heading, new LinearLayout.LayoutParams(-1, -2));
 
             ScrollView scroll = new ScrollView(c);
@@ -220,13 +220,13 @@ final class BookmarkChrome {
 
         Sheet row(int icon, String label, String supporting, boolean destructive, Runnable click) {
             LinearLayout item = chrome.row();
-            item.setPadding(chrome.dp(20), chrome.dp(11), chrome.dp(20), chrome.dp(11));
-            item.setMinimumHeight(chrome.dp(58));
+            item.setPadding(chrome.dp(16), chrome.dp(9), chrome.dp(16), chrome.dp(9));
+            item.setMinimumHeight(chrome.dp(50));
             item.setBackground(chrome.ripple());
 
             ImageView symbol = chrome.icon(icon, destructive ? RED : chrome.text, 22);
             LinearLayout.LayoutParams symbolParams = new LinearLayout.LayoutParams(chrome.dp(22), chrome.dp(22));
-            symbolParams.rightMargin = chrome.dp(20);
+            symbolParams.rightMargin = chrome.dp(16);
             item.addView(symbol, symbolParams);
 
             LinearLayout texts = chrome.column();
@@ -236,7 +236,7 @@ final class BookmarkChrome {
             if (supporting != null && !supporting.isEmpty()) {
                 TextView subtitle = chrome.text(supporting, 13, false, chrome.secondary);
                 LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(-1, -2);
-                subtitleParams.topMargin = chrome.dp(4);
+                subtitleParams.topMargin = chrome.dp(2);
                 texts.addView(subtitle, subtitleParams);
             }
             item.addView(texts, new LinearLayout.LayoutParams(0, -2, 1));
@@ -264,8 +264,8 @@ final class BookmarkChrome {
 
         Sheet note(String value) {
             TextView note = chrome.text(value, 13, false, chrome.secondary);
-            note.setPadding(chrome.dp(20), chrome.dp(12),
-                    chrome.dp(20), chrome.dp(16));
+            note.setPadding(chrome.dp(16), chrome.dp(8),
+                    chrome.dp(16), chrome.dp(12));
             scrollContent.addView(note, new LinearLayout.LayoutParams(-1, -2));
             return this;
         }
