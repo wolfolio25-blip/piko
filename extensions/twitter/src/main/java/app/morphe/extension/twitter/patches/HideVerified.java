@@ -6,6 +6,8 @@
 
 package app.morphe.extension.twitter.patches;
 
+import app.morphe.extension.twitter.Utils;
+import app.morphe.extension.twitter.settings.Settings;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONTokener;
@@ -36,6 +38,16 @@ import java.util.Set;
  */
 public final class HideVerified {
 
+    private static final Set<String> knownVerifiedIds =
+            Collections.synchronizedSet(new HashSet<String>());
+
+    private enum Feed { FOR_YOU, FOLLOWING, SEARCH }
+
+    private static boolean enabled(app.morphe.extension.crimera.settings.BooleanSetting setting) {
+        try { return Utils.getBooleanPref(setting); }
+        catch (Throwable ignored) { return true; }
+    }
+
     private static final Set<String> followedVerifiedIds =
             Collections.synchronizedSet(new HashSet<String>());
 
@@ -52,11 +64,8 @@ public final class HideVerified {
 
         try {
             String json = new String(raw, StandardCharsets.UTF_8);
-            if (!json.contains("is_blue_verified")
-                    && !json.contains("ext_is_blue_verified")
-                    && !json.contains("\"verified_type\"")
-                    && !json.contains("\"verification\"")
-                    && !json.contains("\"verified\"")) {
+            if (!json.contains("\"home\"") && !json.contains("search_by_raw_query")
+                    && !json.contains("search_by_keyword")) {
                 return new ByteArrayInputStream(raw);
             }
             String filtered = filterJson(json);
@@ -67,26 +76,46 @@ public final class HideVerified {
         }
     }
 
-    /** Return the original text when nothing was filtered or parsing fails. */
+    /** Never filter user-profile timelines, tweet detail, or open conversations. */
     static String filterJson(String input) {
         try {
-            Object root = new JSONTokener(input).nextValue();
+            Object rootValue = new JSONTokener(input).nextValue();
+            if (!(rootValue instanceof JSONObject)) return input;
+            JSONObject root = (JSONObject) rootValue;
+            JSONObject data = root.optJSONObject("data");
+            if (data == null) return input;
 
-            // Read follow relationships BEFORE deleting timeline entries.
+            JSONObject home = data.optJSONObject("home");
+            JSONObject target = null;
+            Feed feed = null;
+            if (home != null) {
+                // X exposes separate GraphQL timeline fields for For You and Following.
+                target = firstObject(home, "home_latest_timeline_urt", "home_latest_timeline");
+                if (target != null) feed = Feed.FOLLOWING;
+                else {
+                    target = firstObject(home, "home_timeline_urt", "home_timeline_v2",
+                            "home_timeline");
+                    if (target != null) feed = Feed.FOR_YOU;
+                }
+            }
+            if (feed == null) {
+                target = firstObject(data, "search_by_raw_query", "search_by_keyword");
+                if (target != null) feed = Feed.SEARCH;
+            }
+            // This intentional fail-open protects user profiles and quote/reply detail views.
+            if (feed == null || target == null) return input;
+
             Set<String> positivelyFollowed = new HashSet<>();
             Set<String> explicitlyNotFollowed = new HashSet<>();
-            collectRelationships(root, positivelyFollowed, explicitlyNotFollowed);
+            collectRelationships(target, positivelyFollowed, explicitlyNotFollowed);
             synchronized (followedVerifiedIds) {
-                for (String id : explicitlyNotFollowed) {
+                for (String id : explicitlyNotFollowed)
                     if (!positivelyFollowed.contains(id)) followedVerifiedIds.remove(id);
-                }
                 followedVerifiedIds.addAll(positivelyFollowed);
             }
 
-            int removed = walk(root);
-            if (removed == 0) return input;
-            String output = root.toString();
-            return output != null ? output : input;
+            int removed = walk(target, feed);
+            return removed == 0 ? input : root.toString();
         } catch (Throwable t) {
             return input;
         }
@@ -100,6 +129,7 @@ public final class HideVerified {
             JSONObject obj = (JSONObject) node;
             if (userVerified(obj)) {
                 String id = userId(obj);
+                if (!id.isEmpty()) knownVerifiedIds.add(id);
                 Boolean following = followingStatus(obj);
                 if (!id.isEmpty() && following != null) {
                     if (following) followed.add(id);
@@ -118,7 +148,7 @@ public final class HideVerified {
         }
     }
 
-    private static int walk(Object node) {
+    private static int walk(Object node, Feed feed) {
         int removed = 0;
         if (node instanceof JSONObject) {
             JSONObject obj = (JSONObject) node;
@@ -129,44 +159,44 @@ public final class HideVerified {
             for (String key : keys) {
                 Object value = obj.opt(key);
                 if ("instructions".equals(key) && value instanceof JSONArray) {
-                    removed += filterInstructions((JSONArray) value);
+                    removed += filterInstructions((JSONArray) value, feed);
                 } else if ("entries".equals(key) && value instanceof JSONArray) {
-                    removed += filterEntries((JSONArray) value);
+                    removed += filterEntries((JSONArray) value, feed);
                 }
-                removed += walk(value);
+                removed += walk(value, feed);
             }
         } else if (node instanceof JSONArray) {
             JSONArray arr = (JSONArray) node;
-            for (int i = 0; i < arr.length(); i++) removed += walk(arr.opt(i));
+            for (int i = 0; i < arr.length(); i++) removed += walk(arr.opt(i), feed);
         }
         return removed;
     }
 
-    private static int filterInstructions(JSONArray instructions) {
+    private static int filterInstructions(JSONArray instructions, Feed feed) {
         int removed = 0;
         for (int i = instructions.length() - 1; i >= 0; i--) {
             JSONObject instr = instructions.optJSONObject(i);
             if (instr == null) continue;
 
             JSONObject entry = instr.optJSONObject("entry");
-            if (entry != null && entryHidden(entry)) {
+            if (entry != null && entryHidden(entry, feed)) {
                 instructions.remove(i);
                 removed++;
                 continue;
             }
             JSONArray moduleItems = instr.optJSONArray("moduleItems");
-            if (moduleItems != null) removed += filterItems(moduleItems);
+            if (moduleItems != null) removed += filterItems(moduleItems, feed);
         }
         return removed;
     }
 
-    private static int filterEntries(JSONArray entries) {
+    private static int filterEntries(JSONArray entries, Feed feed) {
         int removed = 0;
         for (int i = entries.length() - 1; i >= 0; i--) {
             JSONObject entry = entries.optJSONObject(i);
             if (entry == null) continue;
 
-            if (entryHidden(entry)) {
+            if (entryHidden(entry, feed)) {
                 entries.remove(i);
                 removed++;
                 continue;
@@ -175,7 +205,7 @@ public final class HideVerified {
             JSONObject content = entry.optJSONObject("content");
             JSONArray items = content == null ? null : content.optJSONArray("items");
             if (items != null) {
-                int count = filterItems(items);
+                int count = filterItems(items, feed);
                 removed += count;
                 if (count > 0 && items.length() == 0) entries.remove(i);
             }
@@ -183,13 +213,13 @@ public final class HideVerified {
         return removed;
     }
 
-    private static int filterItems(JSONArray items) {
+    private static int filterItems(JSONArray items, Feed feed) {
         int removed = 0;
         for (int i = items.length() - 1; i >= 0; i--) {
             JSONObject module = items.optJSONObject(i);
             JSONObject item = module == null ? null : module.optJSONObject("item");
             JSONObject content = item == null ? null : firstObject(item, "content", "itemContent");
-            if (content != null && itemHidden(content)) {
+            if (content != null && itemHidden(content, feed)) {
                 items.remove(i);
                 removed++;
             }
@@ -197,38 +227,64 @@ public final class HideVerified {
         return removed;
     }
 
-    private static boolean entryHidden(JSONObject entry) {
+    private static boolean entryHidden(JSONObject entry, Feed feed) {
         JSONObject content = entry.optJSONObject("content");
         if (content == null) return false;
         JSONObject inner = firstObject(content, "content", "itemContent");
         if (inner == null) inner = content;
-        return itemHidden(inner);
+        return itemHidden(inner, feed);
     }
 
-    private static boolean itemHidden(JSONObject itemContent) {
+    private static boolean itemHidden(JSONObject itemContent, Feed feed) {
         JSONObject tweetResult = firstObject(itemContent, "tweetResult", "tweet_results");
-        return tweetResult != null && shouldHide(tweetResult.optJSONObject("result"), 0);
+        return tweetResult != null && shouldHide(tweetResult.optJSONObject("result"), feed, 0);
     }
 
-    /** Only the tweet author (and the original author of a repost) matters. */
-    private static boolean shouldHide(JSONObject result, int depth) {
+    /**
+     * Filter only the top-level home/search entry, never mutate referenced
+     * originals. This keeps tapped replies, quotes and repost targets accessible.
+     */
+    private static boolean shouldHide(JSONObject result, Feed feed, int depth) {
         if (result == null || depth > 4) return false;
         JSONObject innerTweet = result.optJSONObject("tweet");
         if (innerTweet != null) result = innerTweet;
 
-        JSONObject author = authorOf(result);
-        if (userVerified(author)) {
-            // Keep every post from verified accounts confirmed as followed.
-            if (userFollowed(author)) return false;
-            return true;
+        JSONObject legacy = result.optJSONObject("legacy");
+        JSONObject repost = firstObject(result, "retweeted_status_result");
+        if (repost == null && legacy != null)
+            repost = legacy.optJSONObject("retweeted_status_result");
+        boolean isRepost = repost != null;
+
+        if (feed == Feed.FOLLOWING) {
+            return isRepost && enabled(Settings.TIMELINE_HIDE_FOLLOWING_REPOSTS);
         }
 
-        // Hide reposts of non-followed verified accounts, but do NOT hide
-        // unrelated replies or quotes authored by unverified accounts.
-        JSONObject legacy = result.optJSONObject("legacy");
-        JSONObject repost = legacy == null ? null : legacy.optJSONObject("retweeted_status_result");
-        if (repost == null) repost = result.optJSONObject("retweeted_status_result");
-        return repost != null && shouldHide(repost.optJSONObject("result"), depth + 1);
+        if (feed == Feed.FOR_YOU && enabled(Settings.TIMELINE_HIDE_FOR_YOU_QUOTES)) {
+            boolean quote = (legacy != null && legacy.optBoolean("is_quote_status", false))
+                    || result.optBoolean("is_quote_status", false)
+                    || (legacy != null && legacy.optJSONObject("quoted_status_result") != null)
+                    || result.optJSONObject("quoted_status_result") != null;
+            if (quote) return true;
+        }
+
+        if (feed == Feed.FOR_YOU && enabled(Settings.TIMELINE_HIDE_REPLIES_TO_VERIFIED)
+                && legacy != null) {
+            String replyUserId = legacy.optString("in_reply_to_user_id_str",
+                    legacy.optString("in_reply_to_user_id", ""));
+            if (!replyUserId.isEmpty() && knownVerifiedIds.contains(replyUserId))
+                return true;
+            JSONObject parent = firstObject(result, "in_reply_to_status_result");
+            if (parent == null) parent = firstObject(legacy, "in_reply_to_status_result");
+            if (parent != null && userVerified(authorOf(parent.optJSONObject("result"))))
+                return true;
+        }
+
+        JSONObject author = authorOf(result);
+        if (userVerified(author) && !userFollowed(author)) return true;
+
+        // Reposts of verified accounts not followed: retain original payload
+        // for detail views; remove only this home/search timeline entry.
+        return isRepost && shouldHide(repost.optJSONObject("result"), feed, depth + 1);
     }
 
     /** Current and older X GraphQL user-result shapes. */
