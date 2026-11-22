@@ -44,7 +44,8 @@ public final class BookmarkFolders {
         // Legacy single-account folders can be migrated automatically. In
         // multi-account installations the user chooses where to import them.
         if (!preferences.contains(key) && BookmarkAccountScope.count(context) == 1
-                && preferences.contains(KEY)) {
+                && preferences.contains(KEY)
+                && !preferences.getBoolean(LEGACY_IMPORTED, false)) {
             preferences.edit().putString(key, preferences.getString(KEY, "[]"))
                     .putBoolean(LEGACY_IMPORTED, true).apply();
         }
