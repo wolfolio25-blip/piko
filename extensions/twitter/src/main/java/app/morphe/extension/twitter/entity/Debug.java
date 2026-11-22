@@ -41,7 +41,19 @@ public class Debug {
     }
 
     public Object getMethod(Object clsObj, String methodName) throws Exception {
-        return clsObj.getClass().getDeclaredMethod(methodName).invoke(clsObj);
+        // Tweet model methods can be declared on a parent class in X 12.x.
+        // Prefer public inherited methods, then walk declared methods safely.
+        try { return clsObj.getClass().getMethod(methodName).invoke(clsObj); }
+        catch (NoSuchMethodException ignored) {
+            for (Class<?> type = clsObj.getClass(); type != null; type = type.getSuperclass()) {
+                try {
+                    Method method = type.getDeclaredMethod(methodName);
+                    method.setAccessible(true);
+                    return method.invoke(clsObj);
+                } catch (NoSuchMethodException ignoredParent) {}
+            }
+            throw new NoSuchMethodException(methodName);
+        }
     }
 
     public Object getMethod(String methodName) throws Exception {
