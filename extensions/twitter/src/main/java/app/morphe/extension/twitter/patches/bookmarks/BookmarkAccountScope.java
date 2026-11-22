@@ -48,7 +48,9 @@ final class BookmarkAccountScope {
                 if (intent != null) {
                     for (String key : new String[]{"account_user_id", "account_id", "user_id",
                             "selected_account_id", "account_name"}) {
-                        String value = intent.getStringExtra(key);
+                        String value;
+                        try { value = intent.getStringExtra(key); }
+                        catch (Throwable badExtra) { continue; }
                         if (value == null || value.isEmpty()) continue;
                         for (Account account : accounts)
                             if (value.equals(id(context, account)) || value.equals(account.name))
