@@ -79,6 +79,9 @@ public class Settings {
     public static final BooleanSetting TIMELINE_HIDE_LIVETHREADS = new BooleanSetting("timeline_hide_livethreads", false);
     public static final BooleanSetting TIMELINE_HIDE_BANNER = new BooleanSetting("timeline_hide_banner", true);
     public static final BooleanSetting TIMELINE_HIDE_BMK_ICON = new BooleanSetting("timeline_hide_bookmark_icon", false);
+    public static final BooleanSetting TIMELINE_HIDE_FOR_YOU_QUOTES = new BooleanSetting("timeline_hide_for_you_quotes", true);
+    public static final BooleanSetting TIMELINE_HIDE_REPLIES_TO_VERIFIED = new BooleanSetting("timeline_hide_replies_to_verified", true);
+    public static final BooleanSetting TIMELINE_HIDE_FOLLOWING_REPOSTS = new BooleanSetting("timeline_hide_following_reposts", true);
     public static final BooleanSetting TIMELINE_SHOW_POLL_RESULTS = new BooleanSetting("timeline_show_poll_results", false);
     public static final BooleanSetting TIMELINE_UNSHORT_URL = new BooleanSetting("timeline_unshort_url", true);
     public static final BooleanSetting TIMELINE_HIDE_IMMERSIVE_PLAYER = new BooleanSetting("timeline_hide_immersive_player", false);
