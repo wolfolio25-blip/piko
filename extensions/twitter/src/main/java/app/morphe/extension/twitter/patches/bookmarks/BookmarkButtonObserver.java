@@ -113,6 +113,19 @@ public final class BookmarkButtonObserver {
                     parent = p.getParent();
                 }
             }
+            // A reliable fallback on builds that don't dispatch a click
+            // accessibility event: long-press the bookmark button to save it
+            // into a local folder without changing X's original tap action.
+            if (target.isClickable() && !target.isLongClickable()) {
+                target.setOnLongClickListener(v -> {
+                    Tweet tweet = findTweet(v);
+                    if (tweet == null) return false;
+                    Activity owner = findActivity(v.getContext());
+                    if (owner == null || owner.isFinishing()) return false;
+                    BookmarkFolders.saveTweet(owner, tweet);
+                    return true;
+                });
+            }
             if (target.isClickable() &&
                     !(target.getAccessibilityDelegate() instanceof ClickDelegate)) {
                 View.AccessibilityDelegate original = target.getAccessibilityDelegate();
@@ -301,8 +314,16 @@ public final class BookmarkButtonObserver {
             // Tweet#getTweetId and getTweetUsername are resolved by Piko's
             // generated entity patch. Require both to reject user IDs.
             try {
-                java.lang.reflect.Method id = type.getDeclaredMethod("getId");
-                if (id.getParameterTypes().length == 0 &&
+                java.lang.reflect.Method id;
+                try { id = type.getMethod("getId"); }
+                catch (NoSuchMethodException ignored) {
+                    id = null;
+                    for (Class<?> cls = type; cls != null; cls = cls.getSuperclass()) {
+                        try { id = cls.getDeclaredMethod("getId"); break; }
+                        catch (NoSuchMethodException noMatch) {}
+                    }
+                }
+                if (id != null && id.getParameterTypes().length == 0 &&
                         (id.getReturnType() == long.class || id.getReturnType() == Long.class)) {
                     Tweet tweet = new Tweet(obj);
                     if (tweet.getTweetId() != null && tweet.getTweetUsername() != null) return tweet;
