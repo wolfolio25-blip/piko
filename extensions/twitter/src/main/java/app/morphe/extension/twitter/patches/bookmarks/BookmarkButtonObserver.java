@@ -22,6 +22,7 @@ import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.Toast;
 
 import app.morphe.extension.twitter.entity.Tweet;
+import app.morphe.extension.twitter.patches.HomeTabTracker;
 
 import java.lang.reflect.Field;
 import java.util.Collections;
@@ -104,6 +105,7 @@ public final class BookmarkButtonObserver {
             if (now - scannedAt < 300) return;
             scannedAt = now;
             int[] remaining = {2600};
+            HomeTabTracker.scan(root);
             inspectViews(root, remaining, 0);
         }
     }
