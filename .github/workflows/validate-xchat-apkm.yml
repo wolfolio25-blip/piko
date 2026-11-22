@@ -1,0 +1,90 @@
+name: Validate XChat patch on real X APKM (no release)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'patches/**'
+      - 'extensions/**'
+      - '.github/workflows/validate-xchat-apkm.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  patch-real-x-apkm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_ACTOR: ${{ github.actor }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Build custom Piko patch bundle
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :patches:buildAndroid --no-daemon --console=plain
+
+      - name: Fetch authentic X 12.19.1 stock APKM from Vantage stock cache
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/x-apkm-test
+          gh release download stock-cache -R pmaxhogan/vantage \
+            -p "com.twitter.android-12.19.1-release.0.apkm" \
+            -O /tmp/x-apkm-test/stock.apkm --clobber
+          test -s /tmp/x-apkm-test/stock.apkm
+          file /tmp/x-apkm-test/stock.apkm
+
+      - name: Obtain matching Morphe CLI and Vantage patch options
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/pmaxhogan/vantage.git /tmp/x-apkm-test/vantage
+          cli_url="$(gh api repos/MorpheApp/morphe-cli/releases/latest \
+            --jq '.assets[] | select(.name | endswith("-all.jar")) | .browser_download_url' \
+            | head -1)"
+          test -n "$cli_url"
+          curl -fLsS "$cli_url" -o /tmp/x-apkm-test/morphe-cli-all.jar
+          java -jar /tmp/x-apkm-test/morphe-cli-all.jar list-versions \
+            --patches="$(ls patches/build/libs/patches-*.mpp | head -1)" \
+            -f com.twitter.android
+
+      - name: Test actual X APKM patch application with all custom patches
+        run: |
+          set -euo pipefail
+          keytool -genkeypair -noprompt -alias test -keyalg RSA -keysize 2048 \
+            -validity 7 -storetype PKCS12 -keystore /tmp/x-apkm-test/test.p12 \
+            -storepass 'localtestpass' -keypass 'localtestpass' \
+            -dname 'CN=Temporary build test, O=Test, C=US'
+          export VANTAGE_KEYSTORE_PASS=localtestpass
+          export VANTAGE_KEYSTORE_ALIAS=test
+          mkdir -p /tmp/x-apkm-test/tmp
+          bash /tmp/x-apkm-test/vantage/scripts/patch.sh \
+            --jar /tmp/x-apkm-test/morphe-cli-all.jar \
+            --patches "$(ls patches/build/libs/patches-*.mpp | head -1)" \
+            --options /tmp/x-apkm-test/vantage/config/x-options-max2h.json \
+            --keystore /tmp/x-apkm-test/test.p12 \
+            --apk /tmp/x-apkm-test/stock.apkm \
+            --out /tmp/x-apkm-test/patched.apk \
+            --result /tmp/x-apkm-test/patch-result.json \
+            --log /tmp/x-apkm-test/patch.log \
+            --tmp /tmp/x-apkm-test/tmp
+          test -s /tmp/x-apkm-test/patched.apk
+
+      - name: Upload patch logs if test fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xchat-apkm-patch-failure-logs
+          path: |
+            /tmp/x-apkm-test/patch.log
+            /tmp/x-apkm-test/patch-result.json
+          if-no-files-found: ignore
+          retention-days: 7
