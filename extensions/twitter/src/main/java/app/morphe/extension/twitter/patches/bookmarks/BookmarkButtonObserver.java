@@ -34,6 +34,10 @@ public final class BookmarkButtonObserver {
     private static final String TAG = "PikoBookmarkObserver";
     private static final WeakHashMap<Activity, Watcher> WATCHERS = new WeakHashMap<>();
     private static boolean installed;
+    private static volatile java.lang.ref.WeakReference<Activity> foreground =
+            new java.lang.ref.WeakReference<>(null);
+
+    static Activity foregroundActivity() { return foreground.get(); }
     private static String lastTweetId = "";
     private static long lastClickTime;
 
@@ -47,6 +51,7 @@ public final class BookmarkButtonObserver {
             @Override public void onActivityStarted(Activity a) {}
             @Override public void onActivityResumed(Activity a) {
                 if (!a.getPackageName().equals("com.twitter.android")) return;
+                foreground = new java.lang.ref.WeakReference<>(a);
                 View root = a.getWindow().getDecorView();
                 if (root == null) return;
                 Watcher watcher = WATCHERS.get(a);
@@ -58,7 +63,9 @@ public final class BookmarkButtonObserver {
                     watcher.scan();
                 }
             }
-            @Override public void onActivityPaused(Activity a) {}
+            @Override public void onActivityPaused(Activity a) {
+                if (foreground.get() == a) foreground.clear();
+            }
             @Override public void onActivityStopped(Activity a) {}
             @Override public void onActivitySaveInstanceState(Activity a, Bundle s) {}
             @Override public void onActivityDestroyed(Activity a) {
