@@ -31,21 +31,73 @@ public final class BookmarkFolders {
 
     private BookmarkFolders() {}
 
+    private static final String ACCOUNT_PREFIX = "folders_account_";
+    private static final String LEGACY_IMPORTED = "legacy_imported";
+
     static JSONArray read(Context context) {
-        String source = context.getApplicationContext()
-                .getSharedPreferences(STORE, Context.MODE_PRIVATE)
-                .getString(KEY, "[]");
+        String account = BookmarkAccountScope.current(context);
+        if (account == null) return new JSONArray();
+        SharedPreferences preferences = context.getApplicationContext()
+                .getSharedPreferences(STORE, Context.MODE_PRIVATE);
+        String key = ACCOUNT_PREFIX + account;
+
+        // Legacy single-account folders can be migrated automatically. In
+        // multi-account installations the user chooses where to import them.
+        if (!preferences.contains(key) && BookmarkAccountScope.count(context) == 1
+                && preferences.contains(KEY)) {
+            preferences.edit().putString(key, preferences.getString(KEY, "[]"))
+                    .putBoolean(LEGACY_IMPORTED, true).apply();
+        }
         try {
-            return new JSONArray(source);
+            return new JSONArray(preferences.getString(key, "[]"));
         } catch (Exception ignored) {
             return new JSONArray();
         }
     }
 
     private static void save(Context context, JSONArray folders) {
-        context.getApplicationContext()
-                .getSharedPreferences(STORE, Context.MODE_PRIVATE)
-                .edit().putString(KEY, folders.toString()).apply();
+        String account = BookmarkAccountScope.current(context);
+        if (account == null) return;
+        context.getApplicationContext().getSharedPreferences(STORE, Context.MODE_PRIVATE)
+                .edit().putString(ACCOUNT_PREFIX + account, folders.toString()).apply();
+    }
+
+    static boolean hasLegacyFolders(Context context) {
+        SharedPreferences pref = context.getApplicationContext()
+                .getSharedPreferences(STORE, Context.MODE_PRIVATE);
+        return BookmarkAccountScope.count(context) > 1
+                && !pref.getBoolean(LEGACY_IMPORTED, false)
+                && pref.getString(KEY, "[]").length() > 2;
+    }
+
+    static void importLegacyFolders(Context context, Runnable onImported) {
+        BookmarkAccountScope.ensure(context, () -> {
+            synchronized (LOCK) {
+                SharedPreferences pref = context.getApplicationContext()
+                        .getSharedPreferences(STORE, Context.MODE_PRIVATE);
+                if (pref.getBoolean(LEGACY_IMPORTED, false)) return;
+                JSONArray old;
+                try { old = new JSONArray(pref.getString(KEY, "[]")); }
+                catch (Exception e) { return; }
+                JSONArray current = read(context);
+                for (int i = 0; i < old.length(); i++) {
+                    JSONObject legacy = old.optJSONObject(i);
+                    if (legacy == null) continue;
+                    String name = legacy.optString("name", "");
+                    boolean exists = false;
+                    for (int j = 0; j < current.length(); j++) {
+                        JSONObject existing = current.optJSONObject(j);
+                        if (existing != null && name.equalsIgnoreCase(existing.optString("name")))
+                            exists = true;
+                    }
+                    if (!exists) current.put(legacy);
+                }
+                save(context, current);
+                pref.edit().putBoolean(LEGACY_IMPORTED, true).apply();
+            }
+            notifyUser(context, "Previous folders imported into " + BookmarkAccountScope.label(context));
+            if (onImported != null) onImported.run();
+        });
     }
 
     private static void notifyUser(Context context, String message) {
@@ -90,6 +142,10 @@ public final class BookmarkFolders {
     }
 
     public static void saveTweet(Context context, Tweet tweet) {
+        BookmarkAccountScope.ensure(context, () -> saveTweetForActiveAccount(context, tweet));
+    }
+
+    private static void saveTweetForActiveAccount(Context context, Tweet tweet) {
         JSONObject post = makeSnapshot(tweet);
         if (post == null) {
             notifyUser(context, "Could not read this post");
@@ -211,6 +267,10 @@ public final class BookmarkFolders {
     }
 
     static void promptNewFolder(Context context, Runnable onCreated) {
+        BookmarkAccountScope.ensure(context, () -> promptNewFolderForAccount(context, onCreated));
+    }
+
+    private static void promptNewFolderForAccount(Context context, Runnable onCreated) {
         BookmarkChrome ui = new BookmarkChrome(context);
         BookmarkChrome.Sheet sheet = ui.sheet("Create a folder");
         EditText name = ui.input("Folder name", "");
@@ -255,11 +315,23 @@ public final class BookmarkFolders {
     }
 
     public static void showFolders(Context context) {
+        BookmarkAccountScope.ensure(context, () -> showFoldersForAccount(context));
+    }
+
+    private static void showFoldersForAccount(Context context) {
         JSONArray folders = read(context);
         BookmarkChrome ui = new BookmarkChrome(context);
         BookmarkChrome.Sheet sheet = ui.sheet("Bookmark folders");
+        sheet.row(BookmarkChrome.BOOKMARK, BookmarkAccountScope.label(context),
+                "Switch account", false, () -> BookmarkAccountScope.choose(context,
+                        () -> showFoldersForAccount(context)));
         sheet.row(BookmarkChrome.PLUS, "Create new folder", null, false,
                 () -> promptNewFolder(context, () -> showFolders(context)));
+        if (hasLegacyFolders(context)) {
+            sheet.row(BookmarkChrome.FOLDER, "Import previous folders",
+                    "Choose which account receives the older shared folders", false,
+                    () -> importLegacyFolders(context, () -> showFoldersForAccount(context)));
+        }
         if (folders.length() > 0) sheet.separator();
 
         for (int i = 0; i < folders.length(); i++) {
