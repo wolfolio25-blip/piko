@@ -45,6 +45,19 @@ public class SpoofClientVersionPatch {
         return path.contains("/graphql/") && operations.contains(path.substring(slash + 1));
     }
 
+    /**
+     * Reuse the existing string register at both header insertion points:
+     * do not allocate an extra dex register in X's network header builder.
+     * Only XChat requests are modified.
+     */
+    public static String clientVersion(String original, URI uri) {
+        return isXChatRequest(uri) ? version() : original;
+    }
+
+    public static String userAgentIfXChat(String original, URI uri) {
+        return isXChatRequest(uri) ? userAgent(original) : original;
+    }
+
     /** Injection point: Replaces the version name and version code in a user agent. */
     public static String userAgent(String userAgent) {
         if (userAgent == null) return null;
