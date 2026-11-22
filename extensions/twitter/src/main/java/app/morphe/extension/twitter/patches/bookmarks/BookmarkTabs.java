@@ -266,7 +266,7 @@ public final class BookmarkTabs {
             if (heading != null && heading.getHeight() > 0) {
                 int[] pos = new int[2];
                 heading.getLocationOnScreen(pos);
-                top = pos[1] - rootPos[1] + heading.getHeight() + dp(activity, 14);
+                top = pos[1] - rootPos[1] + heading.getHeight() + dp(activity, 2);
             } else {
                 // Edge-to-edge fallback; status bar height must be accounted for.
                 int status = activity.getResources().getIdentifier("status_bar_height", "dimen", "android");
@@ -306,13 +306,25 @@ public final class BookmarkTabs {
         }
 
         private void applyNativeListPadding() {
-            if (adjustedList != null) {
-                int additional = folderTimelineVisible ? 107 : 53;
-                adjustedList.setPadding(adjustedList.getPaddingLeft(),
-                        listPaddingTop + dp(activity, additional),
-                        adjustedList.getPaddingRight(),
-                        adjustedList.getPaddingBottom());
+            if (adjustedList == null || tabBar.getHeight() == 0) return;
+            // Padding is derived from the REAL native list's screen position,
+            // not hardcoded +53/+107dp (which created the huge empty gaps).
+            int[] listLocation = new int[2];
+            int[] tabLocation = new int[2];
+            adjustedList.getLocationOnScreen(listLocation);
+            tabBar.getLocationOnScreen(tabLocation);
+            int overlayBottom = tabLocation[1] + tabBar.getHeight();
+            if (folderTimelineVisible && folderHeader.getHeight() > 0) {
+                int[] folderLocation = new int[2];
+                folderHeader.getLocationOnScreen(folderLocation);
+                overlayBottom = Math.max(overlayBottom,
+                        folderLocation[1] + folderHeader.getHeight());
             }
+            int neededPx = Math.max(0, overlayBottom - listLocation[1]);
+            adjustedList.setPadding(adjustedList.getPaddingLeft(),
+                    listPaddingTop + neededPx,
+                    adjustedList.getPaddingRight(),
+                    adjustedList.getPaddingBottom());
         }
 
         private TextView findBookmarksTitle(View view, int depth) {
@@ -432,13 +444,49 @@ public final class BookmarkTabs {
             BookmarkChrome ui = new BookmarkChrome(activity);
             LinearLayout list = ui.column();
             list.setBackgroundColor(background);
-            list.setPadding(0, ui.dp(8), 0, ui.dp(26));
+            list.setPadding(0, 0, 0, ui.dp(8));
             foldersView.removeAllViews();
             foldersView.addView(list, new ScrollView.LayoutParams(-1, -2));
 
+            // Per-account folders, with explicit switching when X has multiple accounts.
+            if (BookmarkAccountScope.count(activity) > 1) {
+                LinearLayout accountRow = ui.row();
+                accountRow.setPadding(ui.dp(16), ui.dp(4), ui.dp(16), ui.dp(4));
+                accountRow.setMinimumHeight(ui.dp(44));
+                accountRow.setBackground(ui.ripple());
+                accountRow.addView(ui.text(BookmarkAccountScope.label(activity), 14, true,
+                        secondary), new LinearLayout.LayoutParams(0, -2, 1f));
+                accountRow.addView(ui.icon(BookmarkChrome.MORE, secondary, 20),
+                        new LinearLayout.LayoutParams(ui.dp(20), ui.dp(20)));
+                accountRow.setOnClickListener(v -> BookmarkAccountScope.choose(
+                        activity, this::populateFolders));
+                list.addView(accountRow, new LinearLayout.LayoutParams(-1, ui.dp(44)));
+                list.addView(ui.divider());
+            }
+            if (BookmarkAccountScope.current(activity) == null) {
+                TextView empty = ui.text("Choose your X account to view its folders.",
+                        15, false, secondary);
+                empty.setGravity(Gravity.CENTER);
+                empty.setPadding(ui.dp(20), ui.dp(24), ui.dp(20), ui.dp(24));
+                list.addView(empty);
+                return;
+            }
+            if (BookmarkFolders.hasLegacyFolders(activity)) {
+                LinearLayout importRow = ui.row();
+                importRow.setMinimumHeight(ui.dp(44));
+                importRow.setPadding(ui.dp(16), 0, ui.dp(16), 0);
+                importRow.setBackground(ui.ripple());
+                importRow.addView(ui.text("Import previous shared folders", 15, true,
+                        BookmarkChrome.BLUE));
+                importRow.setOnClickListener(v -> BookmarkFolders.importLegacyFolders(
+                        activity, this::populateFolders));
+                list.addView(importRow, new LinearLayout.LayoutParams(-1, ui.dp(44)));
+                list.addView(ui.divider());
+            }
+
             LinearLayout create = ui.row();
             create.setPadding(ui.dp(20), 0, ui.dp(20), 0);
-            create.setMinimumHeight(ui.dp(54));
+            create.setMinimumHeight(ui.dp(48));
             create.setBackground(ui.ripple());
             LinearLayout.LayoutParams iconP = new LinearLayout.LayoutParams(ui.dp(23), ui.dp(23));
             iconP.rightMargin = ui.dp(18);
@@ -447,13 +495,13 @@ public final class BookmarkTabs {
             create.addView(createLabel, new LinearLayout.LayoutParams(0, -2, 1f));
             create.setOnClickListener(v ->
                     BookmarkFolders.promptNewFolder(activity, this::populateFolders));
-            list.addView(create, new LinearLayout.LayoutParams(-1, ui.dp(54)));
+            list.addView(create, new LinearLayout.LayoutParams(-1, ui.dp(48)));
             list.addView(ui.divider());
 
             android.widget.EditText search = ui.input("Search folders", "");
             search.setSingleLine(true);
             LinearLayout.LayoutParams searchParams = new LinearLayout.LayoutParams(-1, ui.dp(44));
-            searchParams.setMargins(ui.dp(16), ui.dp(14), ui.dp(16), ui.dp(12));
+            searchParams.setMargins(ui.dp(16), ui.dp(8), ui.dp(16), ui.dp(8));
             list.addView(search, searchParams);
 
             LinearLayout rows = ui.column();
@@ -485,8 +533,8 @@ public final class BookmarkTabs {
                 int count = posts == null ? 0 : posts.length();
 
                 LinearLayout item = ui.row();
-                item.setPadding(ui.dp(18), ui.dp(12), ui.dp(18), ui.dp(12));
-                item.setMinimumHeight(ui.dp(76));
+                item.setPadding(ui.dp(16), ui.dp(8), ui.dp(16), ui.dp(8));
+                item.setMinimumHeight(ui.dp(64));
                 item.setBackground(ui.ripple());
 
                 LinearLayout.LayoutParams iconParams =
@@ -522,7 +570,7 @@ public final class BookmarkTabs {
                         : "No matching folders";
                 TextView empty = ui.text(message, 15, false, secondary);
                 empty.setGravity(Gravity.CENTER);
-                empty.setPadding(ui.dp(32), ui.dp(50), ui.dp(32), ui.dp(30));
+                empty.setPadding(ui.dp(24), ui.dp(28), ui.dp(24), ui.dp(24));
                 rows.addView(empty, new LinearLayout.LayoutParams(-1, -2));
             }
         }
@@ -535,9 +583,11 @@ public final class BookmarkTabs {
             // A native timeline is the only tweet renderer for folder contents.
             // Select saved IDs, then recreate X's Bookmarks Activity to load the
             // same feed and adapter it uses for All Tweets.
-            BookmarkNativeTimeline.selectFolder(
-                    activity, folder.optString("name", ""));
-            activity.recreate();
+            BookmarkAccountScope.ensure(activity, () -> {
+                BookmarkNativeTimeline.selectFolder(
+                        activity, folder.optString("name", ""));
+                activity.recreate();
+            });
         }
 
     }
