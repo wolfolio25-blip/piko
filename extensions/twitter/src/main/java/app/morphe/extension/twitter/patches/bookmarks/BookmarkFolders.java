@@ -123,9 +123,11 @@ public final class BookmarkFolders {
             Activity activity = getActivity(context);
             if (activity == null) return;
             String name = String.valueOf(action);
-            if ("Bookmark".equalsIgnoreCase(name)
-                    || "AddBookmark".equalsIgnoreCase(name)
-                    || "AddToBookmarks".equalsIgnoreCase(name)) {
+            String actionName = name.toLowerCase(java.util.Locale.ROOT);
+            if (actionName.contains("bookmark")
+                    && !actionName.contains("remove")
+                    && !actionName.contains("delete")
+                    && !actionName.contains("undo")) {
                 saveTweet(activity, new Tweet(tweetObject));
             }
         } catch (Exception exception) {
@@ -139,7 +141,7 @@ public final class BookmarkFolders {
             context = context instanceof android.content.ContextWrapper
                     ? ((android.content.ContextWrapper) context).getBaseContext() : null;
         }
-        return null;
+        return BookmarkButtonObserver.foregroundActivity();
     }
 
     public static void saveTweet(Context context, Tweet tweet) {
