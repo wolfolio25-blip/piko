@@ -349,28 +349,21 @@ public final class BookmarkFolders {
     }
 
     private static void showFolder(Context context, int index) {
-        JSONArray folders = read(context);
-        JSONObject folder = folders.optJSONObject(index);
+        JSONObject folder = read(context).optJSONObject(index);
         if (folder == null) { showFolders(context); return; }
-        JSONArray posts = folder.optJSONArray("posts");
-        BookmarkChrome ui = new BookmarkChrome(context);
-        BookmarkChrome.Sheet sheet = ui.sheet(folder.optString("name"));
-        sheet.row(BookmarkChrome.MORE, "Manage folder", null, false,
-                () -> manageFolder(context, index, () -> showFolders(context)));
-        if (posts == null || posts.length() == 0) {
-            sheet.note("There are no posts in this folder yet.");
-        } else {
-            sheet.separator();
-            for (int i = posts.length() - 1; i >= 0; i--) {
-                JSONObject post = posts.optJSONObject(i);
-                if (post == null) continue;
-                final int postIndex = i;
-                sheet.row(BookmarkChrome.BOOKMARK,
-                        post.optString("label", "Saved post"), null, false,
-                        () -> showPost(context, index, postIndex, () -> showFolder(context, index)));
-            }
+        // Always use X's actual BookmarkActivity and tweet adapter. Never
+        // reproduce post text/media as custom rows in the folder sheet.
+        BookmarkNativeTimeline.selectFolder(context, folder.optString("name", ""));
+        try {
+            Intent intent = new Intent(Intent.ACTION_MAIN);
+            intent.setClassName(context.getPackageName(),
+                    "com.twitter.app.bookmarks.legacy.BookmarkActivity");
+            if (!(context instanceof Activity)) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+        } catch (Exception exception) {
+            BookmarkNativeTimeline.clearFolder();
+            notifyUser(context, "Could not open the native bookmark timeline");
         }
-        sheet.show();
     }
 
     static void showPost(Context context, int folderIndex, int postIndex, Runnable onChanged) {
