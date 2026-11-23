@@ -26,6 +26,12 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      - name: Run extension unit tests
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :extensions:twitter:testDebugUnitTest :extensions:instagram:testDebugUnitTest --no-daemon --console=plain
+
       - name: Build custom Piko patch bundle
         run: |
           set -euo pipefail
