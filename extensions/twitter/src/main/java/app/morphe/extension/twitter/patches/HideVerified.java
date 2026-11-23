@@ -83,7 +83,8 @@ public final class HideVerified {
             if (!json.contains("\"home\"") && !json.contains("search_by_raw_query")
                     && !json.contains("search_by_keyword")
                     && !json.contains("\"is_blue_verified\"")
-                    && !json.contains("\"verified_type\"")) {
+                    && !json.contains("\"verified_type\"")
+                    && !json.contains("\"instructions\"")) {
                 return new ByteArrayInputStream(raw);
             }
             String filtered = filterJson(json);
@@ -101,9 +102,9 @@ public final class HideVerified {
             if (!(rootValue instanceof JSONObject)) return input;
             JSONObject root = (JSONObject) rootValue;
             JSONObject data = root.optJSONObject("data");
-            if (data == null) return input;
+            JSONObject scope = data == null ? root : data;
 
-            JSONObject home = data.optJSONObject("home");
+            JSONObject home = scope.optJSONObject("home");
             JSONObject target = null;
             Feed feed = null;
             if (home != null) {
@@ -120,14 +121,25 @@ public final class HideVerified {
                 }
             }
             if (feed == null) {
-                target = firstObject(data, "search_by_raw_query", "search_by_keyword");
+                target = firstObject(scope, "search_by_raw_query", "search_by_keyword");
                 if (target != null) feed = Feed.SEARCH;
             }
+            if (feed == null && HomeTabTracker.isHomeVisible()) {
+                // Newer X URT responses may omit data.home entirely. Only
+                // classify a generic timeline while the NATIVE home tabs are
+                // actually visible; this never runs on a profile or detail.
+                target = locateTimelineWithEntries(scope, 0);
+                if (target != null) {
+                    feed = HomeTabTracker.current() == HomeTabTracker.FOLLOWING
+                            ? Feed.FOLLOWING : Feed.FOR_YOU;
+                }
+            }
+
             // Learn verified IDs/handles on profile and tweet-detail views too,
             // but NEVER filter their responses. Thus a user may click through
             // and read the original post even if it was filtered from the home feed.
             if (feed == null || target == null) {
-                collectRelationships(data, new HashSet<>(), new HashSet<>());
+                collectRelationships(scope, new HashSet<>(), new HashSet<>());
                 return input;
             }
 
@@ -148,6 +160,35 @@ public final class HideVerified {
                 throw new IllegalStateException("Failed to filter timeline JSON", t);
             return input;
         }
+    }
+
+    private static JSONObject locateTimelineWithEntries(Object node, int depth) {
+        if (node == null || depth > 10) return null;
+        if (node instanceof JSONObject) {
+            JSONObject obj = (JSONObject) node;
+            JSONArray instructions = obj.optJSONArray("instructions");
+            if (instructions != null) {
+                for (int i = 0; i < instructions.length(); i++) {
+                    JSONObject instruction = instructions.optJSONObject(i);
+                    if (instruction == null) continue;
+                    if (instruction.optJSONArray("entries") != null
+                            || instruction.optJSONObject("entry") != null) return obj;
+                }
+            }
+            java.util.Iterator<String> keys = obj.keys();
+            while (keys.hasNext()) {
+                JSONObject candidate = locateTimelineWithEntries(
+                        obj.opt(keys.next()), depth + 1);
+                if (candidate != null) return candidate;
+            }
+        } else if (node instanceof JSONArray) {
+            JSONArray arr = (JSONArray) node;
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject candidate = locateTimelineWithEntries(arr.opt(i), depth + 1);
+                if (candidate != null) return candidate;
+            }
+        }
+        return null;
     }
 
     /** Learn which verified users the viewer currently follows. */
