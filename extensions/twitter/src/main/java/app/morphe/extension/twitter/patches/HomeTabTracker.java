@@ -19,17 +19,23 @@ public final class HomeTabTracker {
     public static final int FOR_YOU = 1;
     public static final int FOLLOWING = 2;
     private static volatile int selectedTab = UNKNOWN;
+    private static volatile boolean homeTabsVisible;
 
     private HomeTabTracker() {}
 
     public static int current() { return selectedTab; }
+    public static boolean isHomeVisible() { return homeTabsVisible; }
 
     public static void scan(View root) {
         if (root == null) return;
         try {
             TextView[] tabs = new TextView[2];
             findTabs(root, tabs, 0, new int[]{500});
-            if (tabs[0] == null || tabs[1] == null) return;
+            if (tabs[0] == null || tabs[1] == null) {
+                homeTabsVisible = false;
+                return;
+            }
+            homeTabsVisible = true;
             boolean forYou = selected(tabs[0]);
             boolean following = selected(tabs[1]);
             if (forYou != following) {
