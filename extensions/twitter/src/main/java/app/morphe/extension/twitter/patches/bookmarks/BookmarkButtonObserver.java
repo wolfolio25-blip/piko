@@ -38,7 +38,7 @@ public final class BookmarkButtonObserver {
     private static volatile java.lang.ref.WeakReference<Activity> foreground =
             new java.lang.ref.WeakReference<>(null);
 
-    static Activity foregroundActivity() { return foreground.get(); }
+    public static Activity foregroundActivity() { return foreground.get(); }
     private static String lastTweetId = "";
     private static long lastClickTime;
     private static final WeakHashMap<View, ButtonState> BUTTON_STATES = new WeakHashMap<>();
