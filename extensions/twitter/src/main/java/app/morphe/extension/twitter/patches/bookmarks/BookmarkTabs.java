@@ -523,26 +523,22 @@ public final class BookmarkTabs {
             foldersView.removeAllViews();
             foldersView.addView(list, new ScrollView.LayoutParams(-1, -2));
 
-            // Per-account folders, with explicit switching when X has multiple accounts.
-            if (BookmarkAccountScope.count(activity) > 1) {
-                LinearLayout accountRow = ui.row();
-                accountRow.setPadding(ui.dp(16), ui.dp(4), ui.dp(16), ui.dp(4));
-                accountRow.setMinimumHeight(ui.dp(44));
-                accountRow.setBackground(ui.ripple());
-                accountRow.addView(ui.text(BookmarkAccountScope.label(activity), 14, true,
-                        secondary), new LinearLayout.LayoutParams(0, -2, 1f));
-                accountRow.addView(ui.icon(BookmarkChrome.MORE, secondary, 20),
-                        new LinearLayout.LayoutParams(ui.dp(20), ui.dp(20)));
-                accountRow.setOnClickListener(v -> BookmarkAccountScope.choose(
-                        activity, this::populateFolders));
-                list.addView(accountRow, new LinearLayout.LayoutParams(-1, ui.dp(44)));
-                list.addView(ui.divider());
-            }
+            // The folder owner follows X's current session automatically.
+            // Display its label for clarity; never ask users to switch folders
+            // manually when they switch their X account.
+            String activeLabel = BookmarkAccountScope.label(activity);
+            LinearLayout accountRow = ui.row();
+            accountRow.setPadding(ui.dp(16), ui.dp(4), ui.dp(16), ui.dp(4));
+            accountRow.setMinimumHeight(ui.dp(40));
+            accountRow.addView(ui.text(activeLabel, 14, true, secondary));
+            list.addView(accountRow, new LinearLayout.LayoutParams(-1, ui.dp(40)));
+            list.addView(ui.divider());
             if (BookmarkAccountScope.current(activity) == null) {
-                TextView empty = ui.text("Choose your X account to view its folders.",
+                TextView empty = ui.text(
+                        "X's current account is unavailable. Switch to your account in X and reopen Bookmarks.",
                         15, false, secondary);
                 empty.setGravity(Gravity.CENTER);
-                empty.setPadding(ui.dp(20), ui.dp(24), ui.dp(20), ui.dp(24));
+                empty.setPadding(ui.dp(16), ui.dp(20), ui.dp(16), ui.dp(20));
                 list.addView(empty);
                 return;
             }
