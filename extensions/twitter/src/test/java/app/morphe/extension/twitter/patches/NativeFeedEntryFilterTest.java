@@ -54,7 +54,7 @@ public final class NativeFeedEntryFilterTest {
         JsonTimelineTweet content = (JsonTimelineTweet) quoteItem.a;
         b.a payload = (b.a) content.a;
         payload.g = new com.twitter.model.core.d.b();
-        payload.g.Z = new com.twitter.model.core.d();
+        payload.g.V0 = new com.twitter.model.core.d();
         quote.c = quoteItem;
         NativeEntry original = new NativeEntry();
         original.c = item(false);
