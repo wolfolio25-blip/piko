@@ -57,6 +57,68 @@ public final class NativeFeedEntryFilter {
         }
     }
 
+    private static boolean forYouHideVerifiedReplies() {
+        try {
+            return app.morphe.extension.twitter.Utils.getBooleanPref(
+                    app.morphe.extension.twitter.settings.Settings.TIMELINE_HIDE_REPLIES_TO_VERIFIED);
+        } catch (Throwable ignored) {
+            return true;
+        }
+    }
+
+    private static String authorId(Object payload) {
+        Object user = field(payload, "a");
+        if (user == null) return "";
+        try {
+            java.lang.reflect.Method getId = user.getClass().getMethod("getId");
+            Object id = getId.invoke(user);
+            return id == null ? "" : String.valueOf(id);
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    static boolean isReplyToKnownVerified(Object payload) {
+        if (payload == null ||
+                !"com.twitter.model.core.b$a".equals(payload.getClass().getName())
+                || !HideVerified.hasKnownVerifiedTargets()) return false;
+        Object status = field(payload, "g");
+        if (status == null ||
+                !"com.twitter.model.core.d$b".equals(status.getClass().getName()))
+            return false;
+        String ownId = authorId(payload);
+        // X's status builder contains in-reply-to username / user ID scalar
+        // fields. Their obfuscated names vary, so compare exact scalar VALUES
+        // only with verified accounts already observed by the app, never post
+        // text, usernames embedded in text, or arbitrary string substrings.
+        for (Field scalar : status.getClass().getFields()) {
+            try {
+                if (scalar.getType() == String.class
+                        && !"r".equals(scalar.getName())) {
+                    String value = (String) scalar.get(status);
+                    if (value != null && value.length() <= 30
+                            && value.indexOf(' ') < 0
+                            && HideVerified.isKnownVerifiedHandle(value)) return true;
+                }
+                if (scalar.getType() == long.class) {
+                    long value = scalar.getLong(status);
+                    if (value > 0) {
+                        String id = String.valueOf(value);
+                        if (!id.equals(ownId)
+                                && HideVerified.isKnownVerifiedUserId(id)) return true;
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
+        return false;
+    }
+
+    private static boolean isUnfollowedVerifiedNativeAuthor(Object payload) {
+        String id = authorId(payload);
+        return !id.isEmpty() &&
+                HideVerified.isKnownUnfollowedVerifiedUserId(id);
+    }
+
     private static boolean followingHideReposts() {
         try {
             return app.morphe.extension.twitter.Utils.getBooleanPref(
@@ -74,8 +136,11 @@ public final class NativeFeedEntryFilter {
         if (payload == null) return false;
         if (HomeTabTracker.current() == HomeTabTracker.FOLLOWING)
             return followingHideReposts() && isRepostPayload(payload);
-        if (HomeTabTracker.current() == HomeTabTracker.FOR_YOU)
-            return forYouHideQuotes() && isQuotedPayload(payload);
+        if (HomeTabTracker.current() == HomeTabTracker.FOR_YOU) {
+            if (forYouHideQuotes() && isQuotedPayload(payload)) return true;
+            if (forYouHideVerifiedReplies() && isReplyToKnownVerified(payload)) return true;
+            return isUnfollowedVerifiedNativeAuthor(payload);
+        }
         return false;
     }
 
