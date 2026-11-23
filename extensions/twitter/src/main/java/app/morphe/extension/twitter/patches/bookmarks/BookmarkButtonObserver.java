@@ -80,16 +80,27 @@ public final class BookmarkButtonObserver {
         final View root;
         final ViewTreeObserver.OnGlobalLayoutListener onLayout;
         final ViewTreeObserver.OnScrollChangedListener onScroll;
+        final ViewTreeObserver.OnPreDrawListener onPreDraw;
         long scannedAt;
+        long tabScannedAt;
         Watcher(View root) {
             this.root = root;
             onLayout = this::scan;
             onScroll = this::scan;
+            onPreDraw = () -> {
+                long now = SystemClock.uptimeMillis();
+                if (now - tabScannedAt > 180) {
+                    tabScannedAt = now;
+                    HomeTabTracker.scan(root);
+                }
+                return true;
+            };
         }
         void attach() {
             if (root.getViewTreeObserver().isAlive()) {
                 root.getViewTreeObserver().addOnGlobalLayoutListener(onLayout);
                 root.getViewTreeObserver().addOnScrollChangedListener(onScroll);
+                root.getViewTreeObserver().addOnPreDrawListener(onPreDraw);
             }
             root.post(this::scan);
         }
@@ -98,6 +109,7 @@ public final class BookmarkButtonObserver {
             if (tree.isAlive()) {
                 tree.removeOnGlobalLayoutListener(onLayout);
                 tree.removeOnScrollChangedListener(onScroll);
+                tree.removeOnPreDrawListener(onPreDraw);
             }
         }
         void scan() {
@@ -246,8 +258,8 @@ public final class BookmarkButtonObserver {
         // Do not open a picker for an already-bookmarked post being REMOVED.
         String description = previousLabel == null ? ""
                 : previousLabel.toLowerCase(java.util.Locale.ROOT);
-        if (description.contains("remove") || description.contains("delete")
-                || description.contains("bookmarked")) return;
+        boolean removing = description.contains("remove")
+                || description.contains("delete") || description.contains("bookmarked");
 
         Tweet tweet = tweetAtClick != null ? tweetAtClick : findTweet(clicked);
         if (tweet == null) {
@@ -256,6 +268,10 @@ public final class BookmarkButtonObserver {
             return;
         }
         try {
+            if (removing) {
+                BookmarkFolders.onUnbookmark(activity, tweet);
+                return;
+            }
             String id = String.valueOf(tweet.getTweetId());
             long now = SystemClock.uptimeMillis();
             if (id.equals(lastTweetId) && now - lastClickTime < 1500) return;

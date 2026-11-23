@@ -65,12 +65,67 @@ final class BookmarkAccountScope {
         return null;
     }
 
+    /**
+     * Resolve X's own currently selected account, not the last manually
+     * chosen folder owner. Read only selected/current account preference keys.
+     * No authentication tokens, cookies, or unrelated values are accessed.
+     */
+    private static String nativeSelectedAccount(Context context, Account[] entries) {
+        try {
+            java.io.File prefsDir = new java.io.File(
+                    context.getApplicationInfo().dataDir, "shared_prefs");
+            java.io.File[] files = prefsDir.listFiles();
+            if (files == null) return null;
+            String[] keys = {
+                    "selected_account", "selected_account_id", "current_account",
+                    "current_account_id", "active_account", "active_account_id",
+                    "active_user", "active_user_id", "current_user_id",
+                    "selectedAccount", "currentAccount", "activeAccount"
+            };
+            for (String key : keys) {
+                String match = null;
+                for (java.io.File file : files) {
+                    String filename = file.getName();
+                    if (!filename.endsWith(".xml") || filename.startsWith("piko_")
+                            || filename.startsWith("morphe_")) continue;
+                    String name = filename.substring(0, filename.length() - 4);
+                    SharedPreferences prefs = context.getSharedPreferences(name,
+                            Context.MODE_PRIVATE);
+                    if (!prefs.contains(key)) continue;
+                    String value;
+                    try { value = prefs.getString(key, null); }
+                    catch (ClassCastException notString) {
+                        try { value = String.valueOf(prefs.getLong(key, 0L)); }
+                        catch (ClassCastException notLong) {
+                            try { value = String.valueOf(prefs.getInt(key, 0)); }
+                            catch (ClassCastException notInt) { continue; }
+                        }
+                    }
+                    if (value == null || value.isEmpty()) continue;
+                    for (Account a : entries) {
+                        String userId = id(context, a);
+                        if (value.equals(userId) || value.equalsIgnoreCase(a.name)
+                                || value.equalsIgnoreCase("@" + a.name)) {
+                            if (match != null && !match.equals(userId)) return null;
+                            match = userId;
+                        }
+                    }
+                }
+                if (match != null) return match;
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
     static String current(Context context) {
         Account[] entries = accounts(context);
         if (entries.length == 0) return null;
         if (entries.length == 1) return id(context, entries[0]);
 
-        // An explicit Activity account id takes priority when X supplies one.
+        // Prefer X's live selected account, which changes when users switch
+        // in the app. The old manual selection is only a legacy fallback.
+        String nativeAccount = nativeSelectedAccount(context, entries);
+        if (nativeAccount != null) return nativeAccount;
         String fromIntent = intentAccount(context, entries);
         if (fromIntent != null) return fromIntent;
         String selected = context.getApplicationContext()

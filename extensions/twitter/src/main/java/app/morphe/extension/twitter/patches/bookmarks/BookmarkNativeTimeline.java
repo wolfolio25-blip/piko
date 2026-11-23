@@ -44,9 +44,11 @@ public final class BookmarkNativeTimeline {
     public static boolean keepNativeEntryId(String entryId) {
         Selection active = selected;
         if (active == null || !bookmarkScreenVisible || entryId == null) return true;
-        if (entryId.startsWith("cursor-")) return true;
+        // Never expose the unfiltered native bookmarks in a folder.
+        if (entryId.startsWith("cursor-") || entryId.contains("cursor-top")
+                || entryId.contains("cursor-bottom")) return true;
         String id = idFromEntryId(entryId);
-        return id.isEmpty() || active.ids.contains(id);
+        return !id.isEmpty() && active.ids.contains(id);
     }
 
     private static String idFromEntryId(String entryId) {
@@ -55,6 +57,10 @@ public final class BookmarkNativeTimeline {
         if (position < 0 && entryId.startsWith("bookmark-")) {
             position = 0;
             offset = 9;
+        }
+        if (position < 0 && entryId.startsWith("tweet_")) {
+            position = 0;
+            offset = 6;
         }
         if (position < 0) return "";
         String suffix = entryId.substring(position + offset);
@@ -104,6 +110,14 @@ public final class BookmarkNativeTimeline {
     }
 
     public static boolean isFiltering() { return selected != null; }
+
+    public static void removeTweetId(String id) {
+        Selection old = selected;
+        if (old == null || id == null || !old.ids.contains(id)) return;
+        Set<String> updated = new HashSet<>(old.ids);
+        updated.remove(id);
+        selected = new Selection(old.folder, updated);
+    }
 
     /**
      * Called at the existing Jackson InputStream parser hook.
@@ -157,7 +171,8 @@ public final class BookmarkNativeTimeline {
     private static boolean isBookmarkResponse(String text) {
         return text.contains("\"bookmark_timeline_v2\"") ||
                 text.contains("\"bookmark_timeline\"") ||
-                text.contains("\"bookmarks_timeline\"");
+                text.contains("\"bookmarks_timeline\"") ||
+                text.contains("\"bookmark_timeline_urt\"");
     }
 
     static String filterBookmarksJson(String json, Set<String> allowed) {
@@ -166,7 +181,8 @@ public final class BookmarkNativeTimeline {
             JSONObject data = root.optJSONObject("data");
             if (data == null) return json;
             JSONObject bookmarks = first(data,
-                    "bookmark_timeline_v2", "bookmark_timeline", "bookmarks_timeline");
+                    "bookmark_timeline_v2", "bookmark_timeline",
+                    "bookmarks_timeline", "bookmark_timeline_urt");
             if (bookmarks == null) return json;
             JSONObject timeline = bookmarks.optJSONObject("timeline");
             if (timeline == null) timeline = bookmarks;

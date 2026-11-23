@@ -9,6 +9,7 @@ package app.crimera.patches.twitter.misc.settings
 import app.crimera.utils.InitMethod
 import app.crimera.patches.twitter.misc.crashLogs.crashLogsPatch
 import app.crimera.patches.twitter.misc.clientversion.spoofClientVersionPatch
+import app.crimera.patches.twitter.timeline.hideVerified.hideVerifiedUsersPatch
 import app.crimera.patches.twitter.misc.extension.sharedExtensionPatch
 import app.crimera.patches.twitter.misc.extension.twitterInitHook
 import app.crimera.patches.twitter.ads.timelineEntryHook.timelineEntryHookPatch
@@ -65,6 +66,7 @@ val settingsPatch =
             checkCompatibilityPatch,
             sharedExtensionPatch,
             spoofClientVersionPatch,
+            hideVerifiedUsersPatch,
             settingsResourcePatch,
             redirectBMTab,
             timelineEntryHookPatch,

@@ -45,9 +45,23 @@ public final class HideVerified {
 
     private enum Feed { FOR_YOU, FOLLOWING, SEARCH }
 
+    // JVM unit tests can run without Android SharedPreferences. Unset in the app.
+    private static volatile Boolean testEnabled;
+    static void overrideEnabledForTest(Boolean value) { testEnabled = value; }
+
     private static boolean enabled(app.morphe.extension.crimera.settings.BooleanSetting setting) {
-        try { return Utils.getBooleanPref(setting); }
-        catch (Throwable ignored) { return true; }
+        Boolean injected = testEnabled;
+        if (injected != null) return injected;
+        // Before X's Application is initialized (and in isolated tests), use
+        // the setting's actual default rather than Android's uninitialized
+        // SharedPreferences returning false for every switch.
+        try {
+            if (app.morphe.extension.shared.Utils.getContext() == null)
+                return setting.defaultValue;
+            return Utils.getBooleanPref(setting);
+        } catch (Throwable ignored) {
+            return setting.defaultValue;
+        }
     }
 
     private static final Set<String> followedVerifiedIds =
@@ -129,6 +143,9 @@ public final class HideVerified {
             int removed = walk(target, feed);
             return removed == 0 ? input : root.toString();
         } catch (Throwable t) {
+            // Production must fail open; tests must expose the root cause.
+            if (testEnabled != null)
+                throw new IllegalStateException("Failed to filter timeline JSON", t);
             return input;
         }
     }
@@ -267,21 +284,26 @@ public final class HideVerified {
         JSONObject repost = firstObject(result, "retweeted_status_result");
         if (repost == null && legacy != null)
             repost = legacy.optJSONObject("retweeted_status_result");
-        boolean isRepost = repost != null;
+        boolean isRepost = repost != null ||
+                (legacy != null && !legacy.optString("retweeted_status_id_str", "").isEmpty()) ||
+                (legacy != null && !legacy.optString("retweeted_status_id", "").isEmpty()) ||
+                !result.optString("retweeted_status_id_str", "").isEmpty();
 
         if (feed == Feed.FOLLOWING) {
-            return isRepost && enabled(Settings.TIMELINE_HIDE_FOLLOWING_REPOSTS);
+            return isRepost && (testEnabled != null ? testEnabled : enabled(Settings.TIMELINE_HIDE_FOLLOWING_REPOSTS));
         }
 
-        if (feed == Feed.FOR_YOU && enabled(Settings.TIMELINE_HIDE_FOR_YOU_QUOTES)) {
+        if (feed == Feed.FOR_YOU && (testEnabled != null ? testEnabled : enabled(Settings.TIMELINE_HIDE_FOR_YOU_QUOTES))) {
             boolean quote = (legacy != null && legacy.optBoolean("is_quote_status", false))
                     || result.optBoolean("is_quote_status", false)
                     || (legacy != null && legacy.optJSONObject("quoted_status_result") != null)
-                    || result.optJSONObject("quoted_status_result") != null;
+                    || result.optJSONObject("quoted_status_result") != null
+                    || (legacy != null && !legacy.optString("quoted_status_id_str", "").isEmpty())
+                    || !result.optString("quoted_status_id_str", "").isEmpty();
             if (quote) return true;
         }
 
-        if (feed == Feed.FOR_YOU && enabled(Settings.TIMELINE_HIDE_REPLIES_TO_VERIFIED)
+        if (feed == Feed.FOR_YOU && (testEnabled != null ? testEnabled : enabled(Settings.TIMELINE_HIDE_REPLIES_TO_VERIFIED))
                 && legacy != null) {
             String replyUserId = legacy.optString("in_reply_to_user_id_str",
                     legacy.optString("in_reply_to_user_id", ""));
@@ -301,7 +323,7 @@ public final class HideVerified {
 
         // Reposts of verified accounts not followed: retain original payload
         // for detail views; remove only this home/search timeline entry.
-        return isRepost && shouldHide(repost.optJSONObject("result"), feed, depth + 1);
+        return repost != null && shouldHide(repost.optJSONObject("result"), feed, depth + 1);
     }
 
     /** Current and older X GraphQL user-result shapes. */
