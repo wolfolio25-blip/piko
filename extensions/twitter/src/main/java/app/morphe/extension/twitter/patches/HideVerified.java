@@ -64,6 +64,10 @@ public final class HideVerified {
         }
     }
 
+    static boolean hasKnownVerifiedTargets() {
+        return !knownVerifiedIds.isEmpty() || !knownVerifiedHandles.isEmpty();
+    }
+
     static boolean isKnownVerifiedHandle(String handle) {
         if (handle == null || handle.isEmpty()) return false;
         String normalized = handle.startsWith("@") ? handle.substring(1) : handle;
