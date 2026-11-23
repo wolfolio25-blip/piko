@@ -53,6 +53,7 @@ public final class BookmarkTabs {
             }
             @Override public void onActivityStarted(Activity a) {}
             @Override public void onActivityResumed(Activity a) {
+                BookmarkNativeTimeline.onAccountChanged(a);
                 if (BOOKMARK_ACTIVITY.equals(a.getClass().getName())) {
                     BookmarkNativeTimeline.setBookmarkScreenVisible(true);
                     a.getWindow().getDecorView().post(() -> attach(a));
@@ -113,7 +114,14 @@ public final class BookmarkTabs {
         // Only wrap the native Bookmarks content once per Activity instance.
         if (INSTALLED.containsKey(activity)) {
             BookmarkPage already = INSTALLED.get(activity);
-            if (already != null) already.shell.post(already::positionControls);
+            if (already != null) {
+                if (already.folderTimelineVisible
+                        && !BookmarkNativeTimeline.isFiltering()) {
+                    already.switchTo(false);
+                } else {
+                    already.shell.post(already::positionControls);
+                }
+            }
             return;
         }
         if (content.getChildCount() == 0) return;
