@@ -73,9 +73,14 @@ public final class BookmarkNativeTimeline {
     private static final class Selection {
         final String folder;
         final Set<String> ids;
+        final String account;
         Selection(String folder, Set<String> ids) {
+            this(folder, ids, null);
+        }
+        Selection(String folder, Set<String> ids, String account) {
             this.folder = folder;
             this.ids = Collections.unmodifiableSet(new HashSet<>(ids));
+            this.account = account;
         }
     }
 
@@ -98,11 +103,18 @@ public final class BookmarkNativeTimeline {
             }
             break;
         }
-        selected = new Selection(folder, ids);
+        selected = new Selection(folder, ids, BookmarkAccountScope.current(context));
         Log.i(TAG, "Selected folder for native timeline: " + folder + " (" + ids.size() + " ids)");
     }
 
     public static void clearFolder() { selected = null; }
+
+    public static void onAccountChanged(Context context) {
+        Selection active = selected;
+        if (active == null || active.account == null) return;
+        String current = BookmarkAccountScope.current(context);
+        if (current != null && !active.account.equals(current)) clearFolder();
+    }
 
     public static String selectedFolder() {
         Selection s = selected;
@@ -116,7 +128,7 @@ public final class BookmarkNativeTimeline {
         if (old == null || id == null || !old.ids.contains(id)) return;
         Set<String> updated = new HashSet<>(old.ids);
         updated.remove(id);
-        selected = new Selection(old.folder, updated);
+        selected = new Selection(old.folder, updated, old.account);
     }
 
     /**
