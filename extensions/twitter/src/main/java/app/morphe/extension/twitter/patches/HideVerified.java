@@ -267,7 +267,10 @@ public final class HideVerified {
         JSONObject repost = firstObject(result, "retweeted_status_result");
         if (repost == null && legacy != null)
             repost = legacy.optJSONObject("retweeted_status_result");
-        boolean isRepost = repost != null;
+        boolean isRepost = repost != null ||
+                (legacy != null && !legacy.optString("retweeted_status_id_str", "").isEmpty()) ||
+                (legacy != null && !legacy.optString("retweeted_status_id", "").isEmpty()) ||
+                !result.optString("retweeted_status_id_str", "").isEmpty();
 
         if (feed == Feed.FOLLOWING) {
             return isRepost && enabled(Settings.TIMELINE_HIDE_FOLLOWING_REPOSTS);
@@ -277,7 +280,9 @@ public final class HideVerified {
             boolean quote = (legacy != null && legacy.optBoolean("is_quote_status", false))
                     || result.optBoolean("is_quote_status", false)
                     || (legacy != null && legacy.optJSONObject("quoted_status_result") != null)
-                    || result.optJSONObject("quoted_status_result") != null;
+                    || result.optJSONObject("quoted_status_result") != null
+                    || (legacy != null && !legacy.optString("quoted_status_id_str", "").isEmpty())
+                    || !result.optString("quoted_status_id_str", "").isEmpty();
             if (quote) return true;
         }
 
@@ -301,7 +306,7 @@ public final class HideVerified {
 
         // Reposts of verified accounts not followed: retain original payload
         // for detail views; remove only this home/search timeline entry.
-        return isRepost && shouldHide(repost.optJSONObject("result"), feed, depth + 1);
+        return repost != null && shouldHide(repost.optJSONObject("result"), feed, depth + 1);
     }
 
     /** Current and older X GraphQL user-result shapes. */
