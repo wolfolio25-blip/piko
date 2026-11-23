@@ -64,6 +64,20 @@ public final class HideVerified {
         }
     }
 
+    static boolean isKnownVerifiedHandle(String handle) {
+        if (handle == null || handle.isEmpty()) return false;
+        String normalized = handle.startsWith("@") ? handle.substring(1) : handle;
+        return knownVerifiedHandles.contains(normalized.toLowerCase(java.util.Locale.ROOT));
+    }
+
+    static boolean isKnownVerifiedUserId(String id) {
+        return id != null && knownVerifiedIds.contains(id);
+    }
+
+    static boolean isKnownUnfollowedVerifiedUserId(String id) {
+        return isKnownVerifiedUserId(id) && !followedVerifiedIds.contains(id);
+    }
+
     private static final Set<String> followedVerifiedIds =
             Collections.synchronizedSet(new HashSet<String>());
 
