@@ -142,7 +142,8 @@ public final class HideVerified {
                 target = firstObject(scope, "search_by_raw_query", "search_by_keyword");
                 if (target != null) feed = Feed.SEARCH;
             }
-            if (feed == null && HomeTabTracker.isHomeVisible()) {
+            if (feed == null && HomeTabTracker.isHomeVisible()
+                    && !isProfileOrConversationPayload(scope)) {
                 // Newer X URT responses may omit data.home entirely. Only
                 // classify a generic timeline while the NATIVE home tabs are
                 // actually visible; this never runs on a profile or detail.
@@ -178,6 +179,22 @@ public final class HideVerified {
                 throw new IllegalStateException("Failed to filter timeline JSON", t);
             return input;
         }
+    }
+
+    /** X profile and conversation URTs can contain the same instructions. */
+    private static boolean isProfileOrConversationPayload(JSONObject root) {
+        if (root == null) return false;
+        for (String key : new String[]{
+                "user", "userByScreenName", "user_by_screen_name", "userByRestId",
+                "user_by_rest_id", "user_result", "userResult",
+                "tweetResult", "tweet_result", "tweetDetail", "tweet_detail",
+                "threaded_conversation_with_injections_v2",
+                "threaded_conversation_with_injections", "threaded_conversation",
+                "conversation", "tweet_by_rest_id", "tweetByRestId"
+        }) {
+            if (root.has(key)) return true;
+        }
+        return false;
     }
 
     private static JSONObject locateTimelineWithEntries(Object node, int depth) {
