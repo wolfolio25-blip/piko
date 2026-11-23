@@ -92,11 +92,16 @@ final class BookmarkAccountScope {
                     SharedPreferences prefs = context.getSharedPreferences(name,
                             Context.MODE_PRIVATE);
                     if (!prefs.contains(key)) continue;
-                    Object raw;
-                    try { raw = prefs.getAll().get(key); }
-                    catch (Throwable ignored) { continue; }
-                    if (raw == null) continue;
-                    String value = String.valueOf(raw);
+                    String value;
+                    try { value = prefs.getString(key, null); }
+                    catch (ClassCastException notString) {
+                        try { value = String.valueOf(prefs.getLong(key, 0L)); }
+                        catch (ClassCastException notLong) {
+                            try { value = String.valueOf(prefs.getInt(key, 0)); }
+                            catch (ClassCastException notInt) { continue; }
+                        }
+                    }
+                    if (value == null || value.isEmpty()) continue;
                     for (Account a : entries) {
                         String userId = id(context, a);
                         if (value.equals(userId) || value.equalsIgnoreCase(a.name)
