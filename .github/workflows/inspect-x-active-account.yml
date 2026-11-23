@@ -39,3 +39,21 @@ jobs:
                           hits.setdefault(n,[]).append(name)
               for n,v in hits.items():print(n,':',','.join(v[:10]))
           PY
+
+      - name: Decompile account selectors and list reference sites
+        run: |
+          set -euo pipefail
+          curl -fLsS "https://github.com/skylot/jadx/releases/download/v1.5.7/jadx-1.5.7.zip" \
+            -o /tmp/inspect/jadx.zip
+          unzip -q /tmp/inspect/jadx.zip -d /tmp/inspect/jadx
+          chmod +x /tmp/inspect/jadx/bin/jadx
+          timeout 400 /tmp/inspect/jadx/bin/jadx --no-res --no-imports -j 6 \
+            -d /tmp/inspect/sources /tmp/inspect/base.apk || true
+          echo "SELECTOR STRING REFERENCES:"
+          grep -R -n -m 2 -E '"(selected_account|current_account|active_user|last_active[^"]*)"' \
+            /tmp/inspect/sources/sources/com/twitter \
+            | head -70 || true
+          echo "SELECTOR CLASS REFERENCES:"
+          grep -R -n -m 2 -E 'getCurrentAccount\(|getActiveAccount\(|getSelectedAccount\(' \
+            /tmp/inspect/sources/sources/com/twitter \
+            | head -60 || true
