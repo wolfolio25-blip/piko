@@ -1,0 +1,41 @@
+name: Inspect X active-account markers (temporary)
+on:
+  push:
+    branches: [fix/bookmarks-native-and-feed-vantage10]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read account marker strings from authentic X APKM
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/inspect
+          gh release download stock-cache -R pmaxhogan/vantage -p "com.twitter.android-12.19.1-release.0.apkm" \
+             -O /tmp/inspect/stock.apkm --clobber
+          unzip -p /tmp/inspect/stock.apkm base.apk > /tmp/inspect/base.apk
+          test -s /tmp/inspect/base.apk
+          python3 - <<'PY'
+          import zipfile,re,collections
+          f='/tmp/inspect/base.apk'
+          needles=('activeaccount','active_account','currentaccount','current_account',
+                   'account_user_id','selected_account','active_user','last_active',
+                   'selectedaccount','switchaccount','sessionmanager','getactivesession',
+                   'getcurrentuser')
+          with zipfile.ZipFile(f) as z:
+              dexnames=[n for n in z.namelist() if re.fullmatch(r'classes\d*\.dex',n)]
+              print('DEX files:',len(dexnames))
+              hits={}
+              for name in dexnames:
+                  b=z.read(name)
+                  for n in needles:
+                      if n.encode().lower() in b.lower():
+                          hits.setdefault(n,[]).append(name)
+              for n,v in hits.items():print(n,':',','.join(v[:10]))
+          PY
