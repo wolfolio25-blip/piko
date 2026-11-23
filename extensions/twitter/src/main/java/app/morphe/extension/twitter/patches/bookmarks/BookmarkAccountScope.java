@@ -7,6 +7,7 @@
 package app.morphe.extension.twitter.patches.bookmarks;
 
 import android.accounts.Account;
+import app.morphe.extension.twitter.patches.PatchDiagnostics;
 import android.accounts.AccountManager;
 import android.app.Activity;
 import android.content.Context;
@@ -119,19 +120,37 @@ final class BookmarkAccountScope {
 
     static String current(Context context) {
         Account[] entries = accounts(context);
-        if (entries.length == 0) return null;
-        if (entries.length == 1) return id(context, entries[0]);
+        PatchDiagnostics.value("account_count", entries.length);
+        if (entries.length == 0) {
+            PatchDiagnostics.hit("account_none");
+            return null;
+        }
+        if (entries.length == 1) {
+            PatchDiagnostics.hit("account_single");
+            return id(context, entries[0]);
+        }
 
         // Prefer X's live selected account, which changes when users switch
         // in the app. The old manual selection is only a legacy fallback.
         String nativeAccount = nativeSelectedAccount(context, entries);
-        if (nativeAccount != null) return nativeAccount;
+        if (nativeAccount != null) {
+            PatchDiagnostics.hit("account_native_resolved");
+            return nativeAccount;
+        }
+        PatchDiagnostics.hit("account_native_missing");
         String fromIntent = intentAccount(context, entries);
-        if (fromIntent != null) return fromIntent;
+        if (fromIntent != null) {
+            PatchDiagnostics.hit("account_intent_resolved");
+            return fromIntent;
+        }
         String selected = context.getApplicationContext()
                 .getSharedPreferences(STORE, Context.MODE_PRIVATE).getString(SELECTED, "");
         for (Account account : entries)
-            if (id(context, account).equals(selected)) return selected;
+            if (id(context, account).equals(selected)) {
+                PatchDiagnostics.hit("account_manual_fallback");
+                return selected;
+            }
+        PatchDiagnostics.hit("account_ambiguous");
         return null;
     }
 
@@ -154,6 +173,7 @@ final class BookmarkAccountScope {
     }
 
     static void choose(Context context, Runnable chosen) {
+        PatchDiagnostics.hit("account_manual_dialog_open");
         Account[] entries = accounts(context);
         BookmarkChrome chrome = new BookmarkChrome(context);
         BookmarkChrome.Sheet sheet = chrome.sheet("Bookmark account");
