@@ -944,6 +944,20 @@ public class ScreenBuilder {
         LegacyTwitterPreferenceCategory category = null;
         if(buildCategory)
             category = preferenceCategory(str("piko_title_timeline"));
+        // Account-aware home timeline filters. Detail views and profiles are never filtered.
+        addPreference(category, helper.switchPreference(
+                "Hide quote posts in For You",
+                "Hide posts that quote other posts from For You only.",
+                Settings.TIMELINE_HIDE_FOR_YOU_QUOTES));
+        addPreference(category, helper.switchPreference(
+                "Hide replies to verified posts in For You",
+                "Hide replies when X exposes the verified parent's account ID.",
+                Settings.TIMELINE_HIDE_REPLIES_TO_VERIFIED));
+        addPreference(category, helper.switchPreference(
+                "Hide reposts in Following",
+                "Keep original posts and replies; remove repost entries only.",
+                Settings.TIMELINE_HIDE_FOLLOWING_REPOSTS));
+
         if (SettingsStatus.disableAutoTimelineScroll) {
             addPreference(category,
                     helper.switchPreference(

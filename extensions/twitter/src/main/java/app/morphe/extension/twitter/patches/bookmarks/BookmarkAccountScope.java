@@ -1,0 +1,123 @@
+/*
+ * Local bookmark-folder account scope. No account credentials or tokens are read.
+ * Uses X's own Android AccountManager entries (also used by Piko token import).
+ * If multiple accounts exist and the active X account cannot be determined,
+ * requests an explicit choice rather than mixing folders across accounts.
+ */
+package app.morphe.extension.twitter.patches.bookmarks;
+
+import android.accounts.Account;
+import android.accounts.AccountManager;
+import android.app.Activity;
+import android.content.Context;
+import android.content.ContextWrapper;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import java.util.ArrayList;
+import java.util.List;
+
+final class BookmarkAccountScope {
+    private static final String TYPE = "com.twitter.android.auth.login";
+    private static final String STORE = "piko_bookmark_account_scope";
+    private static final String SELECTED = "selected_account_id";
+
+    private BookmarkAccountScope() {}
+
+    private static Account[] accounts(Context context) {
+        try {
+            return AccountManager.get(context.getApplicationContext()).getAccountsByType(TYPE);
+        } catch (Throwable ignored) {
+            return new Account[0];
+        }
+    }
+
+    private static String id(Context context, Account account) {
+        try {
+            String result = AccountManager.get(context.getApplicationContext())
+                    .getUserData(account, "account_user_id");
+            if (result != null && !result.isEmpty()) return result;
+        } catch (Throwable ignored) {}
+        return account.name;
+    }
+
+    private static String intentAccount(Context context, Account[] accounts) {
+        Context current = context;
+        for (int depth = 0; current != null && depth < 10; depth++) {
+            if (current instanceof Activity) {
+                Intent intent = ((Activity) current).getIntent();
+                if (intent != null) {
+                    for (String key : new String[]{"account_user_id", "account_id", "user_id",
+                            "selected_account_id", "account_name"}) {
+                        String value;
+                        try { value = intent.getStringExtra(key); }
+                        catch (Throwable badExtra) { continue; }
+                        if (value == null || value.isEmpty()) continue;
+                        for (Account account : accounts)
+                            if (value.equals(id(context, account)) || value.equals(account.name))
+                                return id(context, account);
+                    }
+                }
+                break;
+            }
+            current = current instanceof ContextWrapper
+                    ? ((ContextWrapper) current).getBaseContext() : null;
+        }
+        return null;
+    }
+
+    static String current(Context context) {
+        Account[] entries = accounts(context);
+        if (entries.length == 0) return null;
+        if (entries.length == 1) return id(context, entries[0]);
+
+        // An explicit Activity account id takes priority when X supplies one.
+        String fromIntent = intentAccount(context, entries);
+        if (fromIntent != null) return fromIntent;
+        String selected = context.getApplicationContext()
+                .getSharedPreferences(STORE, Context.MODE_PRIVATE).getString(SELECTED, "");
+        for (Account account : entries)
+            if (id(context, account).equals(selected)) return selected;
+        return null;
+    }
+
+    static String label(Context context) {
+        String active = current(context);
+        if (active == null) return "Choose X account";
+        for (Account a : accounts(context))
+            if (active.equals(id(context, a))) return "@" + a.name;
+        return "Choose X account";
+    }
+
+    static int count(Context context) { return accounts(context).length; }
+
+    static void ensure(Context context, Runnable ready) {
+        if (current(context) != null) {
+            if (ready != null) ready.run();
+            return;
+        }
+        choose(context, ready);
+    }
+
+    static void choose(Context context, Runnable chosen) {
+        Account[] entries = accounts(context);
+        BookmarkChrome chrome = new BookmarkChrome(context);
+        BookmarkChrome.Sheet sheet = chrome.sheet("Bookmark account");
+        if (entries.length == 0) {
+            sheet.note("No X account is available. Sign in before using local folders.");
+            sheet.show();
+            return;
+        }
+        sheet.note("Folders stay separate for each X account. Choose the account you're using.");
+        for (Account account : entries) {
+            String accountId = id(context, account);
+            sheet.row(BookmarkChrome.BOOKMARK, "@" + account.name, null, false, () -> {
+                context.getApplicationContext()
+                        .getSharedPreferences(STORE, Context.MODE_PRIVATE).edit()
+                        .putString(SELECTED, accountId).apply();
+                BookmarkNativeTimeline.clearFolder();
+                if (chosen != null) chosen.run();
+            });
+        }
+        sheet.show();
+    }
+}

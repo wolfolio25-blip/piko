@@ -22,6 +22,7 @@ import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.Toast;
 
 import app.morphe.extension.twitter.entity.Tweet;
+import app.morphe.extension.twitter.patches.HomeTabTracker;
 
 import java.lang.reflect.Field;
 import java.util.Collections;
@@ -34,6 +35,10 @@ public final class BookmarkButtonObserver {
     private static final String TAG = "PikoBookmarkObserver";
     private static final WeakHashMap<Activity, Watcher> WATCHERS = new WeakHashMap<>();
     private static boolean installed;
+    private static volatile java.lang.ref.WeakReference<Activity> foreground =
+            new java.lang.ref.WeakReference<>(null);
+
+    static Activity foregroundActivity() { return foreground.get(); }
     private static String lastTweetId = "";
     private static long lastClickTime;
 
@@ -47,6 +52,7 @@ public final class BookmarkButtonObserver {
             @Override public void onActivityStarted(Activity a) {}
             @Override public void onActivityResumed(Activity a) {
                 if (!a.getPackageName().equals("com.twitter.android")) return;
+                foreground = new java.lang.ref.WeakReference<>(a);
                 View root = a.getWindow().getDecorView();
                 if (root == null) return;
                 Watcher watcher = WATCHERS.get(a);
@@ -58,7 +64,9 @@ public final class BookmarkButtonObserver {
                     watcher.scan();
                 }
             }
-            @Override public void onActivityPaused(Activity a) {}
+            @Override public void onActivityPaused(Activity a) {
+                if (foreground.get() == a) foreground.clear();
+            }
             @Override public void onActivityStopped(Activity a) {}
             @Override public void onActivitySaveInstanceState(Activity a, Bundle s) {}
             @Override public void onActivityDestroyed(Activity a) {
@@ -97,6 +105,7 @@ public final class BookmarkButtonObserver {
             if (now - scannedAt < 300) return;
             scannedAt = now;
             int[] remaining = {2600};
+            HomeTabTracker.scan(root);
             inspectViews(root, remaining, 0);
         }
     }
@@ -112,6 +121,19 @@ public final class BookmarkButtonObserver {
                     if (p.isClickable()) { target = p; break; }
                     parent = p.getParent();
                 }
+            }
+            // A reliable fallback on builds that don't dispatch a click
+            // accessibility event: long-press the bookmark button to save it
+            // into a local folder without changing X's original tap action.
+            if (target.isClickable() && !target.isLongClickable()) {
+                target.setOnLongClickListener(v -> {
+                    Tweet tweet = findTweet(v);
+                    if (tweet == null) return false;
+                    Activity owner = findActivity(v.getContext());
+                    if (owner == null || owner.isFinishing()) return false;
+                    BookmarkFolders.saveTweet(owner, tweet);
+                    return true;
+                });
             }
             if (target.isClickable() &&
                     !(target.getAccessibilityDelegate() instanceof ClickDelegate)) {
@@ -301,8 +323,16 @@ public final class BookmarkButtonObserver {
             // Tweet#getTweetId and getTweetUsername are resolved by Piko's
             // generated entity patch. Require both to reject user IDs.
             try {
-                java.lang.reflect.Method id = type.getDeclaredMethod("getId");
-                if (id.getParameterTypes().length == 0 &&
+                java.lang.reflect.Method id;
+                try { id = type.getMethod("getId"); }
+                catch (NoSuchMethodException ignored) {
+                    id = null;
+                    for (Class<?> cls = type; cls != null; cls = cls.getSuperclass()) {
+                        try { id = cls.getDeclaredMethod("getId"); break; }
+                        catch (NoSuchMethodException noMatch) {}
+                    }
+                }
+                if (id != null && id.getParameterTypes().length == 0 &&
                         (id.getReturnType() == long.class || id.getReturnType() == Long.class)) {
                     Tweet tweet = new Tweet(obj);
                     if (tweet.getTweetId() != null && tweet.getTweetUsername() != null) return tweet;

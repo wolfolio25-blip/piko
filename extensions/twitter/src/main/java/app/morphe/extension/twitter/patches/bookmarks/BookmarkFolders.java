@@ -31,21 +31,74 @@ public final class BookmarkFolders {
 
     private BookmarkFolders() {}
 
+    private static final String ACCOUNT_PREFIX = "folders_account_";
+    private static final String LEGACY_IMPORTED = "legacy_imported";
+
     static JSONArray read(Context context) {
-        String source = context.getApplicationContext()
-                .getSharedPreferences(STORE, Context.MODE_PRIVATE)
-                .getString(KEY, "[]");
+        String account = BookmarkAccountScope.current(context);
+        if (account == null) return new JSONArray();
+        SharedPreferences preferences = context.getApplicationContext()
+                .getSharedPreferences(STORE, Context.MODE_PRIVATE);
+        String key = ACCOUNT_PREFIX + account;
+
+        // Legacy single-account folders can be migrated automatically. In
+        // multi-account installations the user chooses where to import them.
+        if (!preferences.contains(key) && BookmarkAccountScope.count(context) == 1
+                && preferences.contains(KEY)
+                && !preferences.getBoolean(LEGACY_IMPORTED, false)) {
+            preferences.edit().putString(key, preferences.getString(KEY, "[]"))
+                    .putBoolean(LEGACY_IMPORTED, true).apply();
+        }
         try {
-            return new JSONArray(source);
+            return new JSONArray(preferences.getString(key, "[]"));
         } catch (Exception ignored) {
             return new JSONArray();
         }
     }
 
     private static void save(Context context, JSONArray folders) {
-        context.getApplicationContext()
-                .getSharedPreferences(STORE, Context.MODE_PRIVATE)
-                .edit().putString(KEY, folders.toString()).apply();
+        String account = BookmarkAccountScope.current(context);
+        if (account == null) return;
+        context.getApplicationContext().getSharedPreferences(STORE, Context.MODE_PRIVATE)
+                .edit().putString(ACCOUNT_PREFIX + account, folders.toString()).apply();
+    }
+
+    static boolean hasLegacyFolders(Context context) {
+        SharedPreferences pref = context.getApplicationContext()
+                .getSharedPreferences(STORE, Context.MODE_PRIVATE);
+        return BookmarkAccountScope.count(context) > 1
+                && !pref.getBoolean(LEGACY_IMPORTED, false)
+                && pref.getString(KEY, "[]").length() > 2;
+    }
+
+    static void importLegacyFolders(Context context, Runnable onImported) {
+        BookmarkAccountScope.ensure(context, () -> {
+            synchronized (LOCK) {
+                SharedPreferences pref = context.getApplicationContext()
+                        .getSharedPreferences(STORE, Context.MODE_PRIVATE);
+                if (pref.getBoolean(LEGACY_IMPORTED, false)) return;
+                JSONArray old;
+                try { old = new JSONArray(pref.getString(KEY, "[]")); }
+                catch (Exception e) { return; }
+                JSONArray current = read(context);
+                for (int i = 0; i < old.length(); i++) {
+                    JSONObject legacy = old.optJSONObject(i);
+                    if (legacy == null) continue;
+                    String name = legacy.optString("name", "");
+                    boolean exists = false;
+                    for (int j = 0; j < current.length(); j++) {
+                        JSONObject existing = current.optJSONObject(j);
+                        if (existing != null && name.equalsIgnoreCase(existing.optString("name")))
+                            exists = true;
+                    }
+                    if (!exists) current.put(legacy);
+                }
+                save(context, current);
+                pref.edit().putBoolean(LEGACY_IMPORTED, true).apply();
+            }
+            notifyUser(context, "Previous folders imported into " + BookmarkAccountScope.label(context));
+            if (onImported != null) onImported.run();
+        });
     }
 
     private static void notifyUser(Context context, String message) {
@@ -70,9 +123,11 @@ public final class BookmarkFolders {
             Activity activity = getActivity(context);
             if (activity == null) return;
             String name = String.valueOf(action);
-            if ("Bookmark".equalsIgnoreCase(name)
-                    || "AddBookmark".equalsIgnoreCase(name)
-                    || "AddToBookmarks".equalsIgnoreCase(name)) {
+            String actionName = name.toLowerCase(java.util.Locale.ROOT);
+            if (actionName.contains("bookmark")
+                    && !actionName.contains("remove")
+                    && !actionName.contains("delete")
+                    && !actionName.contains("undo")) {
                 saveTweet(activity, new Tweet(tweetObject));
             }
         } catch (Exception exception) {
@@ -86,10 +141,14 @@ public final class BookmarkFolders {
             context = context instanceof android.content.ContextWrapper
                     ? ((android.content.ContextWrapper) context).getBaseContext() : null;
         }
-        return null;
+        return BookmarkButtonObserver.foregroundActivity();
     }
 
     public static void saveTweet(Context context, Tweet tweet) {
+        BookmarkAccountScope.ensure(context, () -> saveTweetForActiveAccount(context, tweet));
+    }
+
+    private static void saveTweetForActiveAccount(Context context, Tweet tweet) {
         JSONObject post = makeSnapshot(tweet);
         if (post == null) {
             notifyUser(context, "Could not read this post");
@@ -211,6 +270,10 @@ public final class BookmarkFolders {
     }
 
     static void promptNewFolder(Context context, Runnable onCreated) {
+        BookmarkAccountScope.ensure(context, () -> promptNewFolderForAccount(context, onCreated));
+    }
+
+    private static void promptNewFolderForAccount(Context context, Runnable onCreated) {
         BookmarkChrome ui = new BookmarkChrome(context);
         BookmarkChrome.Sheet sheet = ui.sheet("Create a folder");
         EditText name = ui.input("Folder name", "");
@@ -255,11 +318,23 @@ public final class BookmarkFolders {
     }
 
     public static void showFolders(Context context) {
+        BookmarkAccountScope.ensure(context, () -> showFoldersForAccount(context));
+    }
+
+    private static void showFoldersForAccount(Context context) {
         JSONArray folders = read(context);
         BookmarkChrome ui = new BookmarkChrome(context);
         BookmarkChrome.Sheet sheet = ui.sheet("Bookmark folders");
+        sheet.row(BookmarkChrome.BOOKMARK, BookmarkAccountScope.label(context),
+                "Switch account", false, () -> BookmarkAccountScope.choose(context,
+                        () -> showFoldersForAccount(context)));
         sheet.row(BookmarkChrome.PLUS, "Create new folder", null, false,
                 () -> promptNewFolder(context, () -> showFolders(context)));
+        if (hasLegacyFolders(context)) {
+            sheet.row(BookmarkChrome.FOLDER, "Import previous folders",
+                    "Choose which account receives the older shared folders", false,
+                    () -> importLegacyFolders(context, () -> showFoldersForAccount(context)));
+        }
         if (folders.length() > 0) sheet.separator();
 
         for (int i = 0; i < folders.length(); i++) {
@@ -276,28 +351,21 @@ public final class BookmarkFolders {
     }
 
     private static void showFolder(Context context, int index) {
-        JSONArray folders = read(context);
-        JSONObject folder = folders.optJSONObject(index);
+        JSONObject folder = read(context).optJSONObject(index);
         if (folder == null) { showFolders(context); return; }
-        JSONArray posts = folder.optJSONArray("posts");
-        BookmarkChrome ui = new BookmarkChrome(context);
-        BookmarkChrome.Sheet sheet = ui.sheet(folder.optString("name"));
-        sheet.row(BookmarkChrome.MORE, "Manage folder", null, false,
-                () -> manageFolder(context, index, () -> showFolders(context)));
-        if (posts == null || posts.length() == 0) {
-            sheet.note("There are no posts in this folder yet.");
-        } else {
-            sheet.separator();
-            for (int i = posts.length() - 1; i >= 0; i--) {
-                JSONObject post = posts.optJSONObject(i);
-                if (post == null) continue;
-                final int postIndex = i;
-                sheet.row(BookmarkChrome.BOOKMARK,
-                        post.optString("label", "Saved post"), null, false,
-                        () -> showPost(context, index, postIndex, () -> showFolder(context, index)));
-            }
+        // Always use X's actual BookmarkActivity and tweet adapter. Never
+        // reproduce post text/media as custom rows in the folder sheet.
+        BookmarkNativeTimeline.selectFolder(context, folder.optString("name", ""));
+        try {
+            Intent intent = new Intent(Intent.ACTION_MAIN);
+            intent.setClassName(context.getPackageName(),
+                    "com.twitter.app.bookmarks.legacy.BookmarkActivity");
+            if (!(context instanceof Activity)) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+        } catch (Exception exception) {
+            BookmarkNativeTimeline.clearFolder();
+            notifyUser(context, "Could not open the native bookmark timeline");
         }
-        sheet.show();
     }
 
     static void showPost(Context context, int folderIndex, int postIndex, Runnable onChanged) {
