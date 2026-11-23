@@ -66,6 +66,24 @@ public final class NativeFeedEntryFilterTest {
                 NativeFeedEntryFilter.hideEntry(quote));
     }
 
+    @Test public void forYouRecognizesReplyToPreviouslyObservedVerifiedUser() throws Exception {
+        Field handlesField = HideVerified.class.getDeclaredField("knownVerifiedHandles");
+        handlesField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        java.util.Set<String> handles = (java.util.Set<String>) handlesField.get(null);
+        handles.add("verifiedperson");
+        try {
+            b.a payload = new b.a();
+            payload.g = new com.twitter.model.core.d.b();
+            payload.g.H = "verifiedperson";
+            assertTrue(NativeFeedEntryFilter.isReplyToKnownVerified(payload));
+            payload.g.H = "ordinaryperson";
+            assertFalse(NativeFeedEntryFilter.isReplyToKnownVerified(payload));
+        } finally {
+            handles.remove("verifiedperson");
+        }
+    }
+
     @Test public void followingFiltersNativeModuleItems() throws Exception {
         home(2, true);
         NativeModuleItem item = new NativeModuleItem(); item.b = item(true);
