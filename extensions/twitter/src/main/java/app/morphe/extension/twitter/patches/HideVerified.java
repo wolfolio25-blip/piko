@@ -45,7 +45,13 @@ public final class HideVerified {
 
     private enum Feed { FOR_YOU, FOLLOWING, SEARCH }
 
+    // JVM unit tests can run without Android SharedPreferences. Unset in the app.
+    private static volatile Boolean testEnabled;
+    static void overrideEnabledForTest(Boolean value) { testEnabled = value; }
+
     private static boolean enabled(app.morphe.extension.crimera.settings.BooleanSetting setting) {
+        Boolean injected = testEnabled;
+        if (injected != null) return injected;
         // Before X's Application is initialized (and in isolated tests), use
         // the setting's actual default rather than Android's uninitialized
         // SharedPreferences returning false for every switch.
