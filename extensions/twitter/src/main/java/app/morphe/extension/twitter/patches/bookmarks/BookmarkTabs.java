@@ -178,6 +178,9 @@ public final class BookmarkTabs {
         final TextView folderHeaderTitle;
         private View adjustedList;
         private int listPaddingTop;
+        private int originalListTopMargin;
+        private int originalListBottomMargin;
+        private int lastListOffset = -1;
         private int lastTop = -1;
         private boolean positioning;
         private boolean folderTimelineVisible;
@@ -288,6 +291,17 @@ public final class BookmarkTabs {
                     if (adjustedList != feed) {
                         adjustedList = feed;
                         listPaddingTop = feed.getPaddingTop();
+                        lastListOffset = -1;
+                        ViewGroup.LayoutParams nativeParams = feed.getLayoutParams();
+                        if (nativeParams instanceof ViewGroup.MarginLayoutParams) {
+                            originalListTopMargin =
+                                    ((ViewGroup.MarginLayoutParams) nativeParams).topMargin;
+                            originalListBottomMargin =
+                                    ((ViewGroup.MarginLayoutParams) nativeParams).bottomMargin;
+                        } else {
+                            originalListTopMargin = 0;
+                            originalListBottomMargin = 0;
+                        }
                     }
                 }
                 if (top < dp(activity, 40) && heading != null && heading.getHeight() > 0) {
@@ -331,19 +345,42 @@ public final class BookmarkTabs {
             int[] rootPos = new int[2];
             adjustedList.getLocationOnScreen(listPos);
             shell.getLocationOnScreen(rootPos);
-            int lowerOverlay = lastTop + dp(activity, folderTimelineVisible ? 107 : 53);
-            int overlap = Math.max(0, lowerOverlay - (listPos[1] - rootPos[1]));
-            int requiredPadding = listPaddingTop + overlap;
-            if (adjustedList.getPaddingTop() != requiredPadding) {
-                adjustedList.setPadding(adjustedList.getPaddingLeft(), requiredPadding,
-                        adjustedList.getPaddingRight(), adjustedList.getPaddingBottom());
+
+            // Absolute content bounds: tabs and folder header occupy REAL space
+            // in the native list's layout. Padding alone leaves X's existing
+            // tweet rows painted above/under the overlaid tabs.
+            int overlayBottom = lastTop + dp(activity, folderTimelineVisible ? 107 : 53);
+            ViewGroup.LayoutParams rawParams = adjustedList.getLayoutParams();
+            if (rawParams instanceof ViewGroup.MarginLayoutParams) {
+                ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) rawParams;
+                int baselineTop = listPos[1] - rootPos[1]
+                        - (lp.topMargin - originalListTopMargin);
+                int needed = Math.max(0, overlayBottom - baselineTop);
+                if (lastListOffset != needed
+                        || lp.topMargin != originalListTopMargin + needed
+                        || lp.bottomMargin != originalListBottomMargin + needed) {
+                    lastListOffset = needed;
+                    lp.topMargin = originalListTopMargin + needed;
+                    lp.bottomMargin = originalListBottomMargin + needed;
+                    adjustedList.setLayoutParams(lp);
+                }
+                if (adjustedList.getPaddingTop() != listPaddingTop) {
+                    adjustedList.setPadding(adjustedList.getPaddingLeft(), listPaddingTop,
+                            adjustedList.getPaddingRight(), adjustedList.getPaddingBottom());
+                }
+                adjustedList.setClipBounds(null);
+            } else {
+                int baselineTop = listPos[1] - rootPos[1]
+                        - Math.round(adjustedList.getTranslationY());
+                int needed = Math.max(0, overlayBottom - baselineTop);
+                if (lastListOffset != needed) {
+                    lastListOffset = needed;
+                    adjustedList.setTranslationY(needed);
+                }
+                adjustedList.setClipBounds(new android.graphics.Rect(0, 0,
+                        adjustedList.getWidth(),
+                        Math.max(0, adjustedList.getHeight() - needed)));
             }
-            // Clip the native list itself to ensure scrolling tweets cannot
-            // bleed through the toolbar, tabs, or opened folder header.
-            android.graphics.Rect currentClip = adjustedList.getClipBounds();
-            android.graphics.Rect wanted =
-                    new android.graphics.Rect(0, overlap, adjustedList.getWidth(), adjustedList.getHeight());
-            if (!wanted.equals(currentClip)) adjustedList.setClipBounds(wanted);
         }
 
         private TextView findBookmarksTitle(View view, int depth) {
