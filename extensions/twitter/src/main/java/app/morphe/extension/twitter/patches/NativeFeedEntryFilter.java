@@ -145,14 +145,14 @@ public final class NativeFeedEntryFilter {
     }
 
     public static boolean hideEntry(Object entry) {
-        if (!HomeTabTracker.isHomeVisible()) return false;
+        if (!HomeTabTracker.isNativeHomeContext()) return false;
         Object entryContent = field(entry, "c");
         Object tweetContent = field(entryContent, "a");
         return shouldHideTweetContent(tweetContent);
     }
 
     public static boolean hideModuleItem(Object module) {
-        if (!HomeTabTracker.isHomeVisible()) return false;
+        if (!HomeTabTracker.isNativeHomeContext()) return false;
         Object item = field(module, "b");
         Object tweetContent = field(item, "a");
         return shouldHideTweetContent(tweetContent);
