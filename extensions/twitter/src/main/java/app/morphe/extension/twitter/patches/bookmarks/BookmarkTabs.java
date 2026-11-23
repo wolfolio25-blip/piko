@@ -288,6 +288,17 @@ public final class BookmarkTabs {
                     int[] feedPos = new int[2];
                     feed.getLocationOnScreen(feedPos);
                     top = feedPos[1] - rootPos[1];
+                    // Subtract our own previous list offset; otherwise each
+                    // layout pass would push the tabs further down again.
+                    if (adjustedList == feed) {
+                        ViewGroup.LayoutParams existingParams = feed.getLayoutParams();
+                        if (existingParams instanceof ViewGroup.MarginLayoutParams) {
+                            top -= ((ViewGroup.MarginLayoutParams) existingParams).topMargin
+                                    - originalListTopMargin;
+                        } else {
+                            top -= Math.round(feed.getTranslationY());
+                        }
+                    }
                     if (adjustedList != feed) {
                         adjustedList = feed;
                         listPaddingTop = feed.getPaddingTop();
