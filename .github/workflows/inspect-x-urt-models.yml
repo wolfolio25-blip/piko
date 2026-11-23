@@ -36,3 +36,19 @@ jobs:
                   allnames.add(key)
             for name in sorted(allnames)[:350]: print(name)
           PY
+
+      - name: Inspect quote and reply fields in X Tweet data models
+        run: |
+          set -euo pipefail
+          curl -fLsS https://github.com/skylot/jadx/releases/download/v1.5.7/jadx-1.5.7.zip -o /tmp/inspect/jadx.zip
+          unzip -q /tmp/inspect/jadx.zip -d /tmp/inspect/jadx
+          chmod +x /tmp/inspect/jadx/bin/jadx
+          for klass in com.twitter.model.json.core.JsonTweetResults com.twitter.model.core.d; do
+            echo "::group::MODEL $klass"
+            timeout 150 /tmp/inspect/jadx/bin/jadx --no-res --no-imports --no-debug-info -j 4               --single-class "$klass" --single-class-output /tmp/inspect/class.java               /tmp/inspect/base.apk || true
+            if test -f /tmp/inspect/class.java; then
+              grep -n -i -C 5 -E 'quote|retweet|reply|quoted|statusid|this.Z|\.Z|JsonField' /tmp/inspect/class.java | head -400 || true
+              rm /tmp/inspect/class.java
+            fi
+            echo "::endgroup::"
+          done
