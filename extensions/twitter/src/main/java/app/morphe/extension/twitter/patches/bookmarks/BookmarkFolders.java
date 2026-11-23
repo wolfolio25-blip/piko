@@ -8,6 +8,9 @@ package app.morphe.extension.twitter.patches.bookmarks;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import app.morphe.extension.twitter.patches.PatchDiagnostics;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
@@ -114,22 +117,48 @@ public final class BookmarkFolders {
             return true;
         });
         screen.addPreference(preference);
+
+        Preference diagnostics = new Preference(context);
+        diagnostics.setTitle("Copy Piko diagnostics");
+        diagnostics.setSummary("Safe counters for bookmark, account and timeline failures");
+        diagnostics.setOnPreferenceClickListener(p -> {
+            try {
+                ClipboardManager manager =
+                        (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
+                if (manager != null) {
+                    manager.setPrimaryClip(ClipData.newPlainText(
+                            "Piko diagnostics", PatchDiagnostics.snapshot()));
+                    BookmarkChrome.notice(context, "Diagnostics copied");
+                }
+            } catch (Throwable ignored) {
+                BookmarkChrome.notice(context, "Could not copy diagnostics");
+            }
+            return true;
+        });
+        screen.addPreference(diagnostics);
     }
 
     /** Best-effort hook for X's share menu bookmark action. */
     public static void onBookmarkAction(Context context, Object action, Object tweetObject) {
-        if (context == null || tweetObject == null || action == null) return;
+        PatchDiagnostics.hit("bookmark_action_hook");
+        if (context == null || tweetObject == null || action == null) {
+            PatchDiagnostics.hit("bookmark_action_missing_input");
+            return;
+        }
         try {
             Activity activity = getActivity(context);
             if (activity == null) return;
             String name = String.valueOf(action);
             String actionName = name.toLowerCase(java.util.Locale.ROOT);
             if (actionName.contains("bookmark")) {
+                PatchDiagnostics.hit("bookmark_action_matched");
                 Tweet tweet = new Tweet(tweetObject);
                 if (actionName.contains("remove") || actionName.contains("delete")
                         || actionName.contains("undo") || actionName.contains("unbookmark")) {
+                    PatchDiagnostics.hit("bookmark_action_remove");
                     onUnbookmark(activity, tweet);
                 } else {
+                    PatchDiagnostics.hit("bookmark_action_add");
                     saveTweet(activity, tweet);
                 }
             }
@@ -140,6 +169,7 @@ public final class BookmarkFolders {
 
     /** Keep local folder membership consistent with X's unbookmark action. */
     public static void onUnbookmark(Context context, Tweet tweet) {
+        PatchDiagnostics.hit("bookmark_remove_callback");
         if (context == null || tweet == null) return;
         try {
             removeTweetFromAllFolders(context, String.valueOf(tweet.getTweetId()));
@@ -167,6 +197,7 @@ public final class BookmarkFolders {
                 }
             }
             if (changed) {
+                PatchDiagnostics.hit("bookmark_folder_membership_removed");
                 save(context, folders);
                 BookmarkNativeTimeline.removeTweetId(id);
             }
@@ -183,15 +214,18 @@ public final class BookmarkFolders {
     }
 
     public static void saveTweet(Context context, Tweet tweet) {
+        PatchDiagnostics.hit("bookmark_save_tweet_called");
         BookmarkAccountScope.ensure(context, () -> saveTweetForActiveAccount(context, tweet));
     }
 
     private static void saveTweetForActiveAccount(Context context, Tweet tweet) {
         JSONObject post = makeSnapshot(tweet);
         if (post == null) {
+            PatchDiagnostics.hit("bookmark_tweet_model_unreadable");
             notifyUser(context, "Could not read this post");
             return;
         }
+        PatchDiagnostics.hit("bookmark_folder_picker_open");
         chooseFolder(context, post);
     }
 
