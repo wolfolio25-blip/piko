@@ -41,7 +41,7 @@ public final class NativeFeedEntryFilter {
                 !"com.twitter.model.core.b$a".equals(payload.getClass().getName()))
             return false;
         Object status = field(payload, "g");
-        Object quotedStatus = field(status, "Z");
+        Object quotedStatus = field(status, "V0");
         // X's status model contains a nested status for quote posts.
         // Do not classify ordinary reposts from the retweetedStatusId field.
         return quotedStatus != null &&
