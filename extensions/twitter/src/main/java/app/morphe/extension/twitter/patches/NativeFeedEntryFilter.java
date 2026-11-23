@@ -104,7 +104,7 @@ public final class NativeFeedEntryFilter {
                     long value = scalar.getLong(status);
                     if (value > 0) {
                         String id = String.valueOf(value);
-                        if (!id.equals(ownId)
+                        if (!ownId.isEmpty() && !id.equals(ownId)
                                 && HideVerified.isKnownVerifiedUserId(id)) return true;
                     }
                 }
