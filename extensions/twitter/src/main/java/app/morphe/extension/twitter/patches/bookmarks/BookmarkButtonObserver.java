@@ -41,6 +41,61 @@ public final class BookmarkButtonObserver {
     static Activity foregroundActivity() { return foreground.get(); }
     private static String lastTweetId = "";
     private static long lastClickTime;
+    private static final WeakHashMap<View, ButtonState> BUTTON_STATES = new WeakHashMap<>();
+
+    private static final class ButtonState {
+        final String tweetId;
+        final int bookmarkedState;
+        ButtonState(String tweetId, int bookmarkedState) {
+            this.tweetId = tweetId;
+            this.bookmarkedState = bookmarkedState;
+        }
+    }
+
+    // X's inline bookmark buttons do not consistently send accessibility-click
+    // events. React to an actual state transition instead of intercepting X's
+    // native click listener or guessing a tweet from a recycled row.
+    private static int bookmarkState(String label) {
+        if (label == null) return -1;
+        String normalized = label.toLowerCase(java.util.Locale.ROOT);
+        if (!normalized.contains("bookmark")) return -1;
+        if (normalized.contains("remove") || normalized.contains("undo")
+                || normalized.contains("bookmarked")
+                || normalized.contains("delete")) return 1;
+        return 0;
+    }
+
+    private static void trackNativeBookmarkChange(View target, String label) {
+        int state = bookmarkState(label);
+        if (state < 0) return;
+        ButtonState previous = BUTTON_STATES.get(target);
+        // Resolve the row model only when the control is new or changed.
+        // A recycled View can point to a DIFFERENT tweet; don't interpret
+        // rebinding it as a user bookmark or unbookmark.
+        if (previous != null && previous.bookmarkedState == state) return;
+        Tweet tweet = findTweet(target);
+        if (tweet == null) return;
+        String id;
+        try { id = String.valueOf(tweet.getTweetId()); }
+        catch (Exception e) { return; }
+        if (id.isEmpty() || "null".equals(id)) return;
+        BUTTON_STATES.put(target, new ButtonState(id, state));
+        if (previous == null || !id.equals(previous.tweetId)
+                || previous.bookmarkedState == state) return;
+        Activity owner = findActivity(target.getContext());
+        if (owner == null || owner.isFinishing() || owner.isDestroyed()) return;
+        long now = SystemClock.uptimeMillis();
+        if (state == 1) {
+            // X completed its bookmark transition. Keep the native X bookmark.
+            if (!id.equals(lastTweetId) || now - lastClickTime >= 1500) {
+                lastTweetId = id;
+                lastClickTime = now;
+                BookmarkFolders.saveTweet(owner, tweet);
+            }
+        } else {
+            BookmarkFolders.onUnbookmark(owner, tweet);
+        }
+    }
 
     private BookmarkButtonObserver() {}
 
@@ -89,10 +144,11 @@ public final class BookmarkButtonObserver {
             onScroll = this::scan;
             onPreDraw = () -> {
                 long now = SystemClock.uptimeMillis();
-                if (now - tabScannedAt > 180) {
+                if (now - tabScannedAt > 220) {
                     tabScannedAt = now;
                     HomeTabTracker.scan(root);
                 }
+                if (now - scannedAt > 700) scan();
                 return true;
             };
         }
@@ -147,6 +203,10 @@ public final class BookmarkButtonObserver {
                     return true;
                 });
             }
+            CharSequence currentLabel = view.getContentDescription();
+            if (currentLabel == null) currentLabel = target.getContentDescription();
+            trackNativeBookmarkChange(target,
+                    currentLabel == null ? "" : currentLabel.toString());
             if (target.isClickable() &&
                     !(target.getAccessibilityDelegate() instanceof ClickDelegate)) {
                 View.AccessibilityDelegate original = target.getAccessibilityDelegate();
