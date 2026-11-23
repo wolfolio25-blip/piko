@@ -55,7 +55,7 @@ public final class BookmarkButtonObserver {
     // X's inline bookmark buttons do not consistently send accessibility-click
     // events. React to an actual state transition instead of intercepting X's
     // native click listener or guessing a tweet from a recycled row.
-    private static int bookmarkState(String label) {
+    static int bookmarkState(String label) {
         if (label == null) return -1;
         String normalized = label.toLowerCase(java.util.Locale.ROOT);
         if (!normalized.contains("bookmark")) return -1;
