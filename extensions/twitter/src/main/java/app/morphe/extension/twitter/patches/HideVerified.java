@@ -143,6 +143,9 @@ public final class HideVerified {
             int removed = walk(target, feed);
             return removed == 0 ? input : root.toString();
         } catch (Throwable t) {
+            // Production must fail open; tests must expose the root cause.
+            if (testEnabled != null)
+                throw new IllegalStateException("Failed to filter timeline JSON", t);
             return input;
         }
     }
