@@ -40,6 +40,8 @@ public final class HideVerified {
 
     private static final Set<String> knownVerifiedIds =
             Collections.synchronizedSet(new HashSet<String>());
+    private static final Set<String> knownVerifiedHandles =
+            Collections.synchronizedSet(new HashSet<String>());
 
     private enum Feed { FOR_YOU, FOLLOWING, SEARCH }
 
@@ -65,7 +67,9 @@ public final class HideVerified {
         try {
             String json = new String(raw, StandardCharsets.UTF_8);
             if (!json.contains("\"home\"") && !json.contains("search_by_raw_query")
-                    && !json.contains("search_by_keyword")) {
+                    && !json.contains("search_by_keyword")
+                    && !json.contains("\"is_blue_verified\"")
+                    && !json.contains("\"verified_type\"")) {
                 return new ByteArrayInputStream(raw);
             }
             String filtered = filterJson(json);
@@ -105,8 +109,13 @@ public final class HideVerified {
                 target = firstObject(data, "search_by_raw_query", "search_by_keyword");
                 if (target != null) feed = Feed.SEARCH;
             }
-            // This intentional fail-open protects user profiles and quote/reply detail views.
-            if (feed == null || target == null) return input;
+            // Learn verified IDs/handles on profile and tweet-detail views too,
+            // but NEVER filter their responses. Thus a user may click through
+            // and read the original post even if it was filtered from the home feed.
+            if (feed == null || target == null) {
+                collectRelationships(data, new HashSet<>(), new HashSet<>());
+                return input;
+            }
 
             Set<String> positivelyFollowed = new HashSet<>();
             Set<String> explicitlyNotFollowed = new HashSet<>();
@@ -133,6 +142,8 @@ public final class HideVerified {
             if (userVerified(obj)) {
                 String id = userId(obj);
                 if (!id.isEmpty()) knownVerifiedIds.add(id);
+                String handle = userHandle(obj);
+                if (!handle.isEmpty()) knownVerifiedHandles.add(handle.toLowerCase(java.util.Locale.ROOT));
                 Boolean following = followingStatus(obj);
                 if (!id.isEmpty() && following != null) {
                     if (following) followed.add(id);
@@ -276,6 +287,9 @@ public final class HideVerified {
                     legacy.optString("in_reply_to_user_id", ""));
             if (!replyUserId.isEmpty() && knownVerifiedIds.contains(replyUserId))
                 return true;
+            String replyHandle = legacy.optString("in_reply_to_screen_name", "");
+            if (!replyHandle.isEmpty() && knownVerifiedHandles.contains(
+                    replyHandle.toLowerCase(java.util.Locale.ROOT))) return true;
             JSONObject parent = firstObject(result, "in_reply_to_status_result");
             if (parent == null) parent = firstObject(legacy, "in_reply_to_status_result");
             if (parent != null && userVerified(authorOf(parent.optJSONObject("result"))))
@@ -327,6 +341,16 @@ public final class HideVerified {
         if (status != null) return status;
         String id = userId(user);
         return !id.isEmpty() && followedVerifiedIds.contains(id);
+    }
+
+    private static String userHandle(JSONObject user) {
+        if (user == null) return "";
+        String handle = user.optString("screen_name", "");
+        JSONObject legacy = user.optJSONObject("legacy");
+        if (handle.isEmpty() && legacy != null) handle = legacy.optString("screen_name", "");
+        JSONObject core = user.optJSONObject("core");
+        if (handle.isEmpty() && core != null) handle = core.optString("screen_name", "");
+        return handle;
     }
 
     private static String userId(JSONObject user) {
