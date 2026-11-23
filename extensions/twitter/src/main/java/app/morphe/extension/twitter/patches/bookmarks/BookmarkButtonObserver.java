@@ -80,16 +80,27 @@ public final class BookmarkButtonObserver {
         final View root;
         final ViewTreeObserver.OnGlobalLayoutListener onLayout;
         final ViewTreeObserver.OnScrollChangedListener onScroll;
+        final ViewTreeObserver.OnPreDrawListener onPreDraw;
         long scannedAt;
+        long tabScannedAt;
         Watcher(View root) {
             this.root = root;
             onLayout = this::scan;
             onScroll = this::scan;
+            onPreDraw = () -> {
+                long now = SystemClock.uptimeMillis();
+                if (now - tabScannedAt > 180) {
+                    tabScannedAt = now;
+                    HomeTabTracker.scan(root);
+                }
+                return true;
+            };
         }
         void attach() {
             if (root.getViewTreeObserver().isAlive()) {
                 root.getViewTreeObserver().addOnGlobalLayoutListener(onLayout);
                 root.getViewTreeObserver().addOnScrollChangedListener(onScroll);
+                root.getViewTreeObserver().addOnPreDrawListener(onPreDraw);
             }
             root.post(this::scan);
         }
@@ -98,6 +109,7 @@ public final class BookmarkButtonObserver {
             if (tree.isAlive()) {
                 tree.removeOnGlobalLayoutListener(onLayout);
                 tree.removeOnScrollChangedListener(onScroll);
+                tree.removeOnPreDrawListener(onPreDraw);
             }
         }
         void scan() {
