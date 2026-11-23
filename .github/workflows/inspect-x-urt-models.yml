@@ -25,13 +25,14 @@ jobs:
           curl -fLsS https://github.com/skylot/jadx/releases/download/v1.5.7/jadx-1.5.7.zip -o /tmp/inspect/jadx.zip
           unzip -q /tmp/inspect/jadx.zip -d /tmp/inspect/jadx
           chmod +x /tmp/inspect/jadx/bin/jadx
-          for klass in com.twitter.model.core.b com.twitter.model.core.d com.twitter.model.core.entity.e; do
+          for klass in com.twitter.model.json.core.JsonTweet com.twitter.model.core.d; do
             echo "::group::MODEL $klass"
             timeout 150 /tmp/inspect/jadx/bin/jadx --no-res --no-imports --no-debug-info -j 4 \
               --single-class "$klass" --single-class-output /tmp/inspect/class.java \
               /tmp/inspect/base.apk || true
             if test -f /tmp/inspect/class.java; then
-              sed -n '1,190p' /tmp/inspect/class.java | head -190 || true
+              grep -n -i -C 3 -E 'quote|retweet|reply|verified|in_reply|is_quote|retweeted|original_author|user_result' /tmp/inspect/class.java | head -260 || true
+              sed -n '1,150p' /tmp/inspect/class.java | head -150 || true
               rm /tmp/inspect/class.java
             fi
             echo "::endgroup::"
