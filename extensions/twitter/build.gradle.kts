@@ -16,4 +16,5 @@ dependencies {
 // Android pieces (stores, activities, UsageStats) are verified on-device.
 dependencies {
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }
