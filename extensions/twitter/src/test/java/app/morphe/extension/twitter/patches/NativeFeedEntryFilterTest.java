@@ -47,6 +47,25 @@ public final class NativeFeedEntryFilterTest {
         home(1, true);
         assertFalse(NativeFeedEntryFilter.hideEntry(retweet));
     }
+    @Test public void forYouRemovesQuotedNativeTweetOnly() throws Exception {
+        home(1, true);
+        NativeEntry quote = new NativeEntry();
+        JsonTimelineItem quoteItem = item(false);
+        JsonTimelineTweet content = (JsonTimelineTweet) quoteItem.a;
+        b.a payload = (b.a) content.a;
+        payload.g = new com.twitter.model.core.d.b();
+        payload.g.Z = new com.twitter.model.core.d();
+        quote.c = quoteItem;
+        NativeEntry original = new NativeEntry();
+        original.c = item(false);
+        assertTrue("Native quote should disappear in For You",
+                NativeFeedEntryFilter.hideEntry(quote));
+        assertFalse(NativeFeedEntryFilter.hideEntry(original));
+        home(2, true);
+        assertFalse("Following should keep quote posts if not a repost",
+                NativeFeedEntryFilter.hideEntry(quote));
+    }
+
     @Test public void followingFiltersNativeModuleItems() throws Exception {
         home(2, true);
         NativeModuleItem item = new NativeModuleItem(); item.b = item(true);
