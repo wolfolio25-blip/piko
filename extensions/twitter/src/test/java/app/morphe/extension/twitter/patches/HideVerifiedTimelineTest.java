@@ -56,18 +56,22 @@ public class HideVerifiedTimelineTest {
 
     @Test public void profileTimelineIsNeverFiltered() throws Exception {
         tab(1);
-        JSONObject verifiedUser = new JSONObject().put("rest_id", "75").put("is_blue_verified", true);
-        JSONObject result = new JSONObject().put("rest_id", "555")
+        JSONObject verifiedUser = new JSONObject().put("rest_id", "75")
+                .put("is_blue_verified", true);
+        JSONObject tweet = new JSONObject().put("rest_id", "555")
                 .put("core", new JSONObject().put("user_results",
                         new JSONObject().put("result", verifiedUser)));
+        JSONObject item = new JSONObject().put("tweet_results",
+                new JSONObject().put("result", tweet));
+        JSONObject entry = new JSONObject().put("content",
+                new JSONObject().put("itemContent", item));
+        JSONArray entries = new JSONArray().put(entry);
+        JSONObject user = new JSONObject().put("timeline",
+                new JSONObject().put("instructions",
+                        new JSONArray().put(new JSONObject().put("entries", entries))));
         String json = new JSONObject().put("data",
-                new JSONObject().put("user", new JSONObject().put("timeline",
-                        new JSONObject().put("instructions", new JSONArray().put(
-                                new JSONObject().put("entries", new JSONArray().put(
-                                        new JSONObject().put("content", new JSONObject().put(
-                                                "itemContent", new JSONObject().put(
-                                                        "tweet_results", new JSONObject().put(
-                                                                "result", result)))))))))))).toString();
+                new JSONObject().put("user", user)).toString();
         assertEquals(json, HideVerified.filterJson(json));
     }
+
 }
