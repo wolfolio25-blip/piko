@@ -213,7 +213,8 @@ public final class BookmarkNativeTimeline {
                 if (addModuleItems != null) removed += filterModuleItems(addModuleItems, allowed);
             }
             if (removed == 0) return json;
-            Log.i(TAG, "Filtered " + removed + " native bookmark timeline items");
+            try { Log.i(TAG, "Filtered " + removed + " native bookmark timeline items"); }
+            catch (Throwable ignored) {} // Android-free regression tests
             return root.toString();
         } catch (Throwable e) {
             Log.w(TAG, "Unrecognised bookmark response, keeping original", e);
