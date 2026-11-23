@@ -246,8 +246,8 @@ public final class BookmarkButtonObserver {
         // Do not open a picker for an already-bookmarked post being REMOVED.
         String description = previousLabel == null ? ""
                 : previousLabel.toLowerCase(java.util.Locale.ROOT);
-        if (description.contains("remove") || description.contains("delete")
-                || description.contains("bookmarked")) return;
+        boolean removing = description.contains("remove")
+                || description.contains("delete") || description.contains("bookmarked");
 
         Tweet tweet = tweetAtClick != null ? tweetAtClick : findTweet(clicked);
         if (tweet == null) {
@@ -256,6 +256,10 @@ public final class BookmarkButtonObserver {
             return;
         }
         try {
+            if (removing) {
+                BookmarkFolders.onUnbookmark(activity, tweet);
+                return;
+            }
             String id = String.valueOf(tweet.getTweetId());
             long now = SystemClock.uptimeMillis();
             if (id.equals(lastTweetId) && now - lastClickTime < 1500) return;
