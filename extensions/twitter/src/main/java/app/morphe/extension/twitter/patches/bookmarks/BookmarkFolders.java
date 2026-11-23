@@ -388,7 +388,7 @@ public final class BookmarkFolders {
         sheet.show();
     }
 
-    private static void showFolder(Context context, int index) {
+    static void showFolder(Context context, int index) {
         JSONObject folder = read(context).optJSONObject(index);
         if (folder == null) { showFolders(context); return; }
         // Always use X's actual BookmarkActivity and tweet adapter. Never
