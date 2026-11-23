@@ -111,7 +111,11 @@ public final class BookmarkTabs {
         if (!(root instanceof FrameLayout)) return;
         FrameLayout content = (FrameLayout) root;
         // Only wrap the native Bookmarks content once per Activity instance.
-        if (INSTALLED.containsKey(activity)) return;
+        if (INSTALLED.containsKey(activity)) {
+            BookmarkPage already = INSTALLED.get(activity);
+            if (already != null) already.shell.post(already::positionControls);
+            return;
+        }
         if (content.getChildCount() == 0) return;
         ArrayList<View> nativeChildren = new ArrayList<>();
         ArrayList<ViewGroup.LayoutParams> params = new ArrayList<>();
@@ -140,6 +144,9 @@ public final class BookmarkTabs {
             if (BookmarkNativeTimeline.isFiltering()) page.showSelectedFolder();
             else page.switchTo(false);
             page.shell.post(page::positionControls);
+            // X may add its native list asynchronously after activity creation.
+            page.shell.postDelayed(page::positionControls, 250);
+            page.shell.postDelayed(page::positionControls, 900);
         } catch (Exception exception) {
             // Restore the original children if a vendor-specific layout rejects wrapping.
             content.removeAllViews();
@@ -171,6 +178,8 @@ public final class BookmarkTabs {
         final TextView folderHeaderTitle;
         private View adjustedList;
         private int listPaddingTop;
+        private int lastTop = -1;
+        private boolean positioning;
         private boolean folderTimelineVisible;
         private boolean nativeListWasFiltered;
         final ScrollView foldersView;
@@ -250,81 +259,91 @@ public final class BookmarkTabs {
             tabBar.bringToFront();
         }
 
-        /** Place tabs after the existing X toolbar, measured from its actual title. */
+        /**
+         * Position the tabs exactly where X starts the native bookmarks list.
+         * Guessing a status-bar height caused the tabs to land halfway down
+         * a tweet on edge-to-edge devices.
+         */
         void positionControls() {
-            if (activity.isFinishing() || activity.isDestroyed()) return;
-            final int[] rootPos = new int[2];
-            shell.getLocationOnScreen(rootPos);
-            TextView heading = findBookmarksTitle(originalView, 0);
-            if (heading != null) {
-                // The native app's own heading supplies the Chirp font family.
-                BookmarkChrome.captureNativeFont(heading.getTypeface());
-                allTab.setTypeface(BookmarkChrome.typeface(true));
-                foldersTab.setTypeface(BookmarkChrome.typeface(true));
-            }
-            int top;
-            if (heading != null && heading.getHeight() > 0) {
-                int[] pos = new int[2];
-                heading.getLocationOnScreen(pos);
-                top = pos[1] - rootPos[1] + heading.getHeight() + dp(activity, 2);
-            } else {
-                // Edge-to-edge fallback; status bar height must be accounted for.
-                int status = activity.getResources().getIdentifier("status_bar_height", "dimen", "android");
-                int statusHeight = status > 0
-                        ? activity.getResources().getDimensionPixelSize(status) : dp(activity, 24);
-                top = statusHeight + dp(activity, 58);
-            }
-            top = Math.max(dp(activity, 64), Math.min(top, shell.getHeight() / 3));
-            FrameLayout.LayoutParams barParams =
-                    new FrameLayout.LayoutParams(-1, dp(activity, 52));
-            barParams.topMargin = top;
-            tabBar.setLayoutParams(barParams);
-            FrameLayout.LayoutParams lineParams =
-                    new FrameLayout.LayoutParams(-1, dp(activity, 1));
-            lineParams.topMargin = top + dp(activity, 52);
-            tabDivider.setLayoutParams(lineParams);
-            FrameLayout.LayoutParams headerParams =
-                    new FrameLayout.LayoutParams(-1, dp(activity, 54));
-            headerParams.topMargin = top + dp(activity, 53);
-            folderHeader.setLayoutParams(headerParams);
-            FrameLayout.LayoutParams foldersParams = new FrameLayout.LayoutParams(-1, -1);
-            foldersParams.topMargin = top + dp(activity, 53);
-            foldersView.setLayoutParams(foldersParams);
-
-            // RecyclerView padding makes the first native post start BELOW the tabs
-            // instead of being obscured by them. Never resize the native toolbar.
-            if (adjustedList == null) {
-                View list = findTweetList(originalView, 0, top + rootPos[1]);
-                if (list != null) {
-                    adjustedList = list;
-                    listPaddingTop = list.getPaddingTop();
-                    applyNativeListPadding();
-                    if (list instanceof ViewGroup) ((ViewGroup) list).setClipToPadding(false);
+            if (activity.isFinishing() || activity.isDestroyed() || positioning) return;
+            if (shell.getHeight() < dp(activity, 120)) return;
+            positioning = true;
+            try {
+                final int[] rootPos = new int[2];
+                shell.getLocationOnScreen(rootPos);
+                TextView heading = findBookmarksTitle(originalView, 0);
+                if (heading != null) {
+                    BookmarkChrome.captureNativeFont(heading.getTypeface());
+                    allTab.setTypeface(BookmarkChrome.typeface(true));
+                    foldersTab.setTypeface(BookmarkChrome.typeface(true));
                 }
+
+                // Prefer measured native feed bounds over title or status-bar guesses.
+                View feed = findTweetList(originalView, 0, 0);
+                int top = -1;
+                if (feed != null && feed.getHeight() > 0) {
+                    int[] feedPos = new int[2];
+                    feed.getLocationOnScreen(feedPos);
+                    top = feedPos[1] - rootPos[1];
+                    if (adjustedList != feed) {
+                        adjustedList = feed;
+                        listPaddingTop = feed.getPaddingTop();
+                    }
+                }
+                if (top < dp(activity, 40) && heading != null && heading.getHeight() > 0) {
+                    int[] pos = new int[2];
+                    heading.getLocationOnScreen(pos);
+                    top = pos[1] - rootPos[1] + heading.getHeight() + dp(activity, 8);
+                }
+                if (top < dp(activity, 40)) {
+                    // android.R.id.content already excludes the status bar on this
+                    // activity. Adding status-bar height again caused a second gap.
+                    top = dp(activity, 56);
+                }
+                top = Math.max(dp(activity, 40), Math.min(top, shell.getHeight() / 3));
+                if (top != lastTop) {
+                    lastTop = top;
+                    FrameLayout.LayoutParams barParams =
+                            new FrameLayout.LayoutParams(-1, dp(activity, 52));
+                    barParams.topMargin = top;
+                    tabBar.setLayoutParams(barParams);
+                    FrameLayout.LayoutParams lineParams =
+                            new FrameLayout.LayoutParams(-1, dp(activity, 1));
+                    lineParams.topMargin = top + dp(activity, 52);
+                    tabDivider.setLayoutParams(lineParams);
+                    FrameLayout.LayoutParams headerParams =
+                            new FrameLayout.LayoutParams(-1, dp(activity, 54));
+                    headerParams.topMargin = top + dp(activity, 53);
+                    folderHeader.setLayoutParams(headerParams);
+                    FrameLayout.LayoutParams foldersParams = new FrameLayout.LayoutParams(-1, -1);
+                    foldersParams.topMargin = top + dp(activity, 53);
+                    foldersView.setLayoutParams(foldersParams);
+                }
+                applyNativeListPadding();
+            } finally {
+                positioning = false;
             }
-            applyNativeListPadding();
         }
 
         private void applyNativeListPadding() {
-            if (adjustedList == null || tabBar.getHeight() == 0) return;
-            // Padding is derived from the REAL native list's screen position,
-            // not hardcoded +53/+107dp (which created the huge empty gaps).
-            int[] listLocation = new int[2];
-            int[] tabLocation = new int[2];
-            adjustedList.getLocationOnScreen(listLocation);
-            tabBar.getLocationOnScreen(tabLocation);
-            int overlayBottom = tabLocation[1] + tabBar.getHeight();
-            if (folderTimelineVisible && folderHeader.getHeight() > 0) {
-                int[] folderLocation = new int[2];
-                folderHeader.getLocationOnScreen(folderLocation);
-                overlayBottom = Math.max(overlayBottom,
-                        folderLocation[1] + folderHeader.getHeight());
+            if (adjustedList == null || lastTop < 0 || adjustedList.getWidth() == 0) return;
+            int[] listPos = new int[2];
+            int[] rootPos = new int[2];
+            adjustedList.getLocationOnScreen(listPos);
+            shell.getLocationOnScreen(rootPos);
+            int lowerOverlay = lastTop + dp(activity, folderTimelineVisible ? 107 : 53);
+            int overlap = Math.max(0, lowerOverlay - (listPos[1] - rootPos[1]));
+            int requiredPadding = listPaddingTop + overlap;
+            if (adjustedList.getPaddingTop() != requiredPadding) {
+                adjustedList.setPadding(adjustedList.getPaddingLeft(), requiredPadding,
+                        adjustedList.getPaddingRight(), adjustedList.getPaddingBottom());
             }
-            int neededPx = Math.max(0, overlayBottom - listLocation[1]);
-            adjustedList.setPadding(adjustedList.getPaddingLeft(),
-                    listPaddingTop + neededPx,
-                    adjustedList.getPaddingRight(),
-                    adjustedList.getPaddingBottom());
+            // Clip the native list itself to ensure scrolling tweets cannot
+            // bleed through the toolbar, tabs, or opened folder header.
+            android.graphics.Rect currentClip = adjustedList.getClipBounds();
+            android.graphics.Rect wanted =
+                    new android.graphics.Rect(0, overlap, adjustedList.getWidth(), adjustedList.getHeight());
+            if (!wanted.equals(currentClip)) adjustedList.setClipBounds(wanted);
         }
 
         private TextView findBookmarksTitle(View view, int depth) {
