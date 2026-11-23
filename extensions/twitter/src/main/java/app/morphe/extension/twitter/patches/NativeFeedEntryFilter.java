@@ -36,6 +36,27 @@ public final class NativeFeedEntryFilter {
         return id instanceof String && !((String) id).isEmpty();
     }
 
+    static boolean isQuotedPayload(Object payload) {
+        if (payload == null ||
+                !"com.twitter.model.core.b$a".equals(payload.getClass().getName()))
+            return false;
+        Object status = field(payload, "g");
+        Object quotedStatus = field(status, "Z");
+        // X's status model contains a nested status for quote posts.
+        // Do not classify ordinary reposts from the retweetedStatusId field.
+        return quotedStatus != null &&
+                "com.twitter.model.core.d".equals(quotedStatus.getClass().getName());
+    }
+
+    private static boolean forYouHideQuotes() {
+        try {
+            return app.morphe.extension.twitter.Utils.getBooleanPref(
+                    app.morphe.extension.twitter.settings.Settings.TIMELINE_HIDE_FOR_YOU_QUOTES);
+        } catch (Throwable ignored) {
+            return true;
+        }
+    }
+
     private static boolean followingHideReposts() {
         try {
             return app.morphe.extension.twitter.Utils.getBooleanPref(
@@ -53,6 +74,8 @@ public final class NativeFeedEntryFilter {
         if (payload == null) return false;
         if (HomeTabTracker.current() == HomeTabTracker.FOLLOWING)
             return followingHideReposts() && isRepostPayload(payload);
+        if (HomeTabTracker.current() == HomeTabTracker.FOR_YOU)
+            return forYouHideQuotes() && isQuotedPayload(payload);
         return false;
     }
 
