@@ -90,10 +90,13 @@ public final class BookmarkButtonObserver {
             if (!id.equals(lastTweetId) || now - lastClickTime >= 1500) {
                 lastTweetId = id;
                 lastClickTime = now;
-                BookmarkFolders.saveTweet(owner, tweet);
+                target.post(() -> {
+                    if (!owner.isFinishing() && !owner.isDestroyed())
+                        BookmarkFolders.saveTweet(owner, tweet);
+                });
             }
         } else {
-            BookmarkFolders.onUnbookmark(owner, tweet);
+            target.post(() -> BookmarkFolders.onUnbookmark(owner, tweet));
         }
     }
 
