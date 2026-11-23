@@ -1,0 +1,38 @@
+name: Inspect stock X URT model structure (temporary)
+
+on:
+  push:
+    branches: [fix/native-feeds-and-drawer-bookmarks-vantage12]
+    paths: ['.github/workflows/inspect-x-urt-models.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: \${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect stock X 12.19.1 URT model classes
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/inspect
+          gh release download stock-cache -R pmaxhogan/vantage -p "com.twitter.android-12.19.1-release.0.apkm" -O /tmp/inspect/stock.apkm
+          unzip -p /tmp/inspect/stock.apkm base.apk > /tmp/inspect/base.apk
+          curl -fLsS https://github.com/skylot/jadx/releases/download/v1.5.7/jadx-1.5.7.zip -o /tmp/inspect/jadx.zip
+          unzip -q /tmp/inspect/jadx.zip -d /tmp/inspect/jadx
+          chmod +x /tmp/inspect/jadx/bin/jadx
+          for klass in com.twitter.model.json.timeline.urt.JsonTimelineEntry com.twitter.model.json.timeline.urt.JsonTimelineModuleItem com.twitter.model.json.timeline.urt.JsonTimelineItem com.twitter.model.json.timeline.urt.JsonTimelineTweet; do
+            echo "::group::MODEL $klass"
+            timeout 150 /tmp/inspect/jadx/bin/jadx --no-res --no-imports --no-debug-info -j 4 \
+              --single-class "$klass" --single-class-output /tmp/inspect/class.java \
+              /tmp/inspect/base.apk || true
+            if test -f /tmp/inspect/class.java; then
+              grep -n -E 'class |public |protected |JsonTweet|JsonTimeline|[[:space:]]+[a-zA-Z0-9_]+ [a-zA-Z0-9_]+[;=]' /tmp/inspect/class.java | head -150 || true
+              rm /tmp/inspect/class.java
+            fi
+            echo "::endgroup::"
+          done
