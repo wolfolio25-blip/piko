@@ -290,10 +290,10 @@ public final class HideVerified {
                 !result.optString("retweeted_status_id_str", "").isEmpty();
 
         if (feed == Feed.FOLLOWING) {
-            return isRepost && enabled(Settings.TIMELINE_HIDE_FOLLOWING_REPOSTS);
+            return isRepost && (testEnabled != null ? testEnabled : enabled(Settings.TIMELINE_HIDE_FOLLOWING_REPOSTS));
         }
 
-        if (feed == Feed.FOR_YOU && enabled(Settings.TIMELINE_HIDE_FOR_YOU_QUOTES)) {
+        if (feed == Feed.FOR_YOU && (testEnabled != null ? testEnabled : enabled(Settings.TIMELINE_HIDE_FOR_YOU_QUOTES))) {
             boolean quote = (legacy != null && legacy.optBoolean("is_quote_status", false))
                     || result.optBoolean("is_quote_status", false)
                     || (legacy != null && legacy.optJSONObject("quoted_status_result") != null)
@@ -303,7 +303,7 @@ public final class HideVerified {
             if (quote) return true;
         }
 
-        if (feed == Feed.FOR_YOU && enabled(Settings.TIMELINE_HIDE_REPLIES_TO_VERIFIED)
+        if (feed == Feed.FOR_YOU && (testEnabled != null ? testEnabled : enabled(Settings.TIMELINE_HIDE_REPLIES_TO_VERIFIED))
                 && legacy != null) {
             String replyUserId = legacy.optString("in_reply_to_user_id_str",
                     legacy.optString("in_reply_to_user_id", ""));
