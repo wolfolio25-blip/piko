@@ -599,14 +599,11 @@ public final class BookmarkTabs {
             JSONObject folder = folders.optJSONObject(folderIndex);
             if (folder == null) { populateFolders(); return; }
 
-            // A native timeline is the only tweet renderer for folder contents.
-            // Select saved IDs, then recreate X's Bookmarks Activity to load the
-            // same feed and adapter it uses for All Tweets.
-            BookmarkAccountScope.ensure(activity, () -> {
-                BookmarkNativeTimeline.selectFolder(
-                        activity, folder.optString("name", ""));
-                activity.recreate();
-            });
+            // Use the SAME pathway as Piko Settings > Bookmark folders,
+            // which opens a fresh native BookmarkActivity. Recreating the current
+            // Activity retained its old all-bookmarks adapter and leaked entries.
+            BookmarkAccountScope.ensure(activity, () ->
+                    BookmarkFolders.showFolder(activity, folderIndex));
         }
 
     }
