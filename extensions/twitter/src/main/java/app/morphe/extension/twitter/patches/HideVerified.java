@@ -46,8 +46,16 @@ public final class HideVerified {
     private enum Feed { FOR_YOU, FOLLOWING, SEARCH }
 
     private static boolean enabled(app.morphe.extension.crimera.settings.BooleanSetting setting) {
-        try { return Utils.getBooleanPref(setting); }
-        catch (Throwable ignored) { return true; }
+        // Before X's Application is initialized (and in isolated tests), use
+        // the setting's actual default rather than Android's uninitialized
+        // SharedPreferences returning false for every switch.
+        try {
+            if (app.morphe.extension.shared.Utils.getContext() == null)
+                return setting.defaultValue;
+            return Utils.getBooleanPref(setting);
+        } catch (Throwable ignored) {
+            return setting.defaultValue;
+        }
     }
 
     private static final Set<String> followedVerifiedIds =
