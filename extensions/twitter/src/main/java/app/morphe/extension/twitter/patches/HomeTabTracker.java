@@ -20,11 +20,34 @@ public final class HomeTabTracker {
     public static final int FOLLOWING = 2;
     private static volatile int selectedTab = UNKNOWN;
     private static volatile boolean homeTabsVisible;
+    private static volatile boolean hasSeenHomeTabs;
+    private static volatile long lastHomeSeenAt;
 
     private HomeTabTracker() {}
 
     public static int current() { return selectedTab; }
     public static boolean isHomeVisible() { return homeTabsVisible; }
+
+    /**
+     * Native URT objects can be parsed before the tabs are drawn, or while
+     * X has hidden its toolbar during scrolling. Restrict this fallback to
+     * X's MAIN Activity: profile and tweet-detail activities are excluded.
+     */
+    public static boolean isNativeHomeContext() {
+        if (homeTabsVisible) return true;
+        android.app.Activity activity =
+                app.morphe.extension.twitter.patches.bookmarks.BookmarkButtonObserver
+                        .foregroundActivity();
+        if (activity == null) return false;
+        String name = activity.getClass().getSimpleName().toLowerCase(java.util.Locale.ROOT);
+        if (!name.contains("mainactivity")) return false;
+        try {
+            if (activity.getIntent() != null && activity.getIntent().getData() != null)
+                return false;
+        } catch (Throwable ignored) {}
+        if (!hasSeenHomeTabs) return true;
+        return System.currentTimeMillis() - lastHomeSeenAt < 12000L;
+    }
 
     public static void scan(View root) {
         if (root == null) return;
@@ -36,6 +59,8 @@ public final class HomeTabTracker {
                 return;
             }
             homeTabsVisible = true;
+            hasSeenHomeTabs = true;
+            lastHomeSeenAt = System.currentTimeMillis();
             boolean forYou = selected(tabs[0]);
             boolean following = selected(tabs[1]);
             if (forYou != following) {
