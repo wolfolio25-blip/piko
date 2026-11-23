@@ -139,7 +139,11 @@ public final class BookmarkNativeTimeline {
 
         try {
             String json = new String(bytes, StandardCharsets.UTF_8);
-            if (!isBookmarkResponse(json)) return new ByteArrayInputStream(bytes);
+            if (!isBookmarkResponse(json) && !(bookmarkScreenVisible
+                    && json.contains("\"instructions\"")
+                    && (json.contains("\"entryId\"") || json.contains("\"entry_id\"")))) {
+                return new ByteArrayInputStream(bytes);
+            }
             String rewritten = filterBookmarksJson(json, active.ids);
             if (rewritten == null || rewritten.equals(json)) return new ByteArrayInputStream(bytes);
             return new ByteArrayInputStream(rewritten.getBytes(StandardCharsets.UTF_8));
@@ -179,14 +183,18 @@ public final class BookmarkNativeTimeline {
         try {
             JSONObject root = new JSONObject(new JSONTokener(json));
             JSONObject data = root.optJSONObject("data");
-            if (data == null) return json;
-            JSONObject bookmarks = first(data,
+            JSONObject bookmarks = data == null ? null : first(data,
                     "bookmark_timeline_v2", "bookmark_timeline",
                     "bookmarks_timeline", "bookmark_timeline_urt");
-            if (bookmarks == null) return json;
-            JSONObject timeline = bookmarks.optJSONObject("timeline");
+            JSONObject timeline = bookmarks == null ? null : bookmarks.optJSONObject("timeline");
             if (timeline == null) timeline = bookmarks;
-            JSONArray instructions = timeline.optJSONArray("instructions");
+            JSONArray instructions = timeline == null ? null : timeline.optJSONArray("instructions");
+            if (instructions == null && bookmarkScreenVisible) {
+                // X 12.19 can serve the Bookmarks list through the native
+                // timeline root without bookmark_timeline_v2. Only use this
+                // fallback while the native Bookmarks Activity is visible.
+                instructions = findTimelineInstructions(root, 0);
+            }
             if (instructions == null) return json;
 
             int removed = 0;
@@ -211,6 +219,32 @@ public final class BookmarkNativeTimeline {
             Log.w(TAG, "Unrecognised bookmark response, keeping original", e);
             return json;
         }
+    }
+
+    /**
+     * Locate a Timeline object inside X's varying Bookmarks response wrappers.
+     * Never search arbitrary non-bookmark responses: caller checks that
+     * BookmarkActivity is visible and that this has timeline entry IDs.
+     */
+    private static JSONArray findTimelineInstructions(Object node, int depth) {
+        if (node == null || depth > 12) return null;
+        if (node instanceof JSONObject) {
+            JSONObject obj = (JSONObject) node;
+            JSONArray direct = obj.optJSONArray("instructions");
+            if (direct != null && direct.toString().contains("entry")) return direct;
+            java.util.Iterator<String> keys = obj.keys();
+            while (keys.hasNext()) {
+                JSONArray result = findTimelineInstructions(obj.opt(keys.next()), depth + 1);
+                if (result != null) return result;
+            }
+        } else if (node instanceof JSONArray) {
+            JSONArray array = (JSONArray) node;
+            for (int i = 0; i < array.length(); i++) {
+                JSONArray result = findTimelineInstructions(array.opt(i), depth + 1);
+                if (result != null) return result;
+            }
+        }
+        return null;
     }
 
     private static int filterEntries(JSONArray entries, Set<String> ids) {
@@ -246,7 +280,10 @@ public final class BookmarkNativeTimeline {
             JSONObject nested = first(module, "item", "content", "itemContent");
             if (nested == null) nested = module;
             String tweetId = tweetId(nested);
-            if (!tweetId.isEmpty() && !ids.contains(tweetId)) {
+            boolean unknownTweet = tweetId.isEmpty()
+                    && (module.toString().contains("\"tweet_results\"")
+                    || module.toString().contains("\"tweetResult\""));
+            if (unknownTweet || (!tweetId.isEmpty() && !ids.contains(tweetId))) {
                 items.remove(i);
                 removed++;
             }
@@ -270,7 +307,7 @@ public final class BookmarkNativeTimeline {
         // Other timeline items such as footers and load indicators are preserved.
         if ("TimelineTimelineItem".equals(type) ||
                 "TimelineTweet".equals(type) ||
-                entryId.startsWith("tweet-")) return false;
+                entryId.contains("tweet-") || entryId.startsWith("bookmark-")) return false;
         return true;
     }
 
