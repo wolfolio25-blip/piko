@@ -32,7 +32,11 @@ public class HideVerifiedTimelineTest {
                 new JSONObject().put(field, obj))).toString();
     }
 
-    @After public void reset() throws Exception { tab(0); }
+    @org.junit.Before public void setup() { HideVerified.overrideEnabledForTest(true); }
+    @After public void reset() throws Exception {
+        tab(0);
+        HideVerified.overrideEnabledForTest(null);
+    }
 
     @Test public void forYouRemovesQuotesButNotOriginals() throws Exception {
         tab(1);
@@ -40,7 +44,7 @@ public class HideVerifiedTimelineTest {
                 entry("111", new JSONObject().put("is_quote_status", true)),
                 entry("222", new JSONObject().put("full_text", "Original post")));
         String result = HideVerified.filterJson(json);
-        assertFalse(result.contains("tweet-111"));
+        assertFalse("Quote tweet must be removed: " + result, result.contains("tweet-111"));
         assertTrue(result.contains("tweet-222"));
     }
 
@@ -50,7 +54,7 @@ public class HideVerifiedTimelineTest {
                 entry("333", new JSONObject().put("retweeted_status_id_str", "123456")),
                 entry("444", new JSONObject().put("full_text", "Original post")));
         String result = HideVerified.filterJson(json);
-        assertFalse(result.contains("tweet-333"));
+        assertFalse("Repost must be removed: " + result, result.contains("tweet-333"));
         assertTrue(result.contains("tweet-444"));
     }
 
