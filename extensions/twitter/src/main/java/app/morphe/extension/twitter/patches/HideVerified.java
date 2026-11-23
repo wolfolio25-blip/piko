@@ -70,11 +70,13 @@ public final class HideVerified {
     /** Wrap the JSON response stream without changing responses on failure. */
     public static InputStream filter(InputStream in) {
         if (in == null) return null;
+        PatchDiagnostics.hit("feed_stream_hook");
         byte[] raw;
         try {
             raw = readAll(in);
             in.close();
         } catch (Throwable t) {
+            PatchDiagnostics.hit("feed_stream_read_error");
             return in;
         }
 
@@ -84,12 +86,19 @@ public final class HideVerified {
                     && !json.contains("search_by_keyword")
                     && !json.contains("\"is_blue_verified\"")
                     && !json.contains("\"verified_type\"")) {
+                PatchDiagnostics.hit("feed_stream_nonmatching");
                 return new ByteArrayInputStream(raw);
             }
+            PatchDiagnostics.hit("feed_stream_candidate");
             String filtered = filterJson(json);
-            if (filtered == json) return new ByteArrayInputStream(raw);
+            if (filtered == json) {
+                PatchDiagnostics.hit("feed_stream_unchanged");
+                return new ByteArrayInputStream(raw);
+            }
+            PatchDiagnostics.hit("feed_stream_rewritten");
             return new ByteArrayInputStream(filtered.getBytes(StandardCharsets.UTF_8));
         } catch (Throwable t) {
+            PatchDiagnostics.hit("feed_stream_error");
             return new ByteArrayInputStream(raw);
         }
     }
@@ -101,7 +110,10 @@ public final class HideVerified {
             if (!(rootValue instanceof JSONObject)) return input;
             JSONObject root = (JSONObject) rootValue;
             JSONObject data = root.optJSONObject("data");
-            if (data == null) return input;
+            if (data == null) {
+                PatchDiagnostics.hit("feed_no_data");
+                return input;
+            }
 
             JSONObject home = data.optJSONObject("home");
             JSONObject target = null;
@@ -127,9 +139,12 @@ public final class HideVerified {
             // but NEVER filter their responses. Thus a user may click through
             // and read the original post even if it was filtered from the home feed.
             if (feed == null || target == null) {
+                PatchDiagnostics.hit("feed_non_home_or_unknown");
                 collectRelationships(data, new HashSet<>(), new HashSet<>());
                 return input;
             }
+            PatchDiagnostics.hit("feed_classified_" + feed.name());
+            PatchDiagnostics.value("feed_selected_tab", HomeTabTracker.current());
 
             Set<String> positivelyFollowed = new HashSet<>();
             Set<String> explicitlyNotFollowed = new HashSet<>();
@@ -141,6 +156,9 @@ public final class HideVerified {
             }
 
             int removed = walk(target, feed);
+            PatchDiagnostics.value("feed_removed_last", removed);
+            if (removed > 0) PatchDiagnostics.hit("feed_removed_some");
+            else PatchDiagnostics.hit("feed_removed_none");
             return removed == 0 ? input : root.toString();
         } catch (Throwable t) {
             // Production must fail open; tests must expose the root cause.
