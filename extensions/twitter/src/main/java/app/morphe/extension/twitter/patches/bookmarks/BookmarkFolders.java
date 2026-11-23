@@ -124,14 +124,52 @@ public final class BookmarkFolders {
             if (activity == null) return;
             String name = String.valueOf(action);
             String actionName = name.toLowerCase(java.util.Locale.ROOT);
-            if (actionName.contains("bookmark")
-                    && !actionName.contains("remove")
-                    && !actionName.contains("delete")
-                    && !actionName.contains("undo")) {
-                saveTweet(activity, new Tweet(tweetObject));
+            if (actionName.contains("bookmark")) {
+                Tweet tweet = new Tweet(tweetObject);
+                if (actionName.contains("remove") || actionName.contains("delete")
+                        || actionName.contains("undo") || actionName.contains("unbookmark")) {
+                    onUnbookmark(activity, tweet);
+                } else {
+                    saveTweet(activity, tweet);
+                }
             }
         } catch (Exception exception) {
             android.util.Log.e("PikoBookmarkFolders", "Bookmark action failed", exception);
+        }
+    }
+
+    /** Keep local folder membership consistent with X's unbookmark action. */
+    public static void onUnbookmark(Context context, Tweet tweet) {
+        if (context == null || tweet == null) return;
+        try {
+            removeTweetFromAllFolders(context, String.valueOf(tweet.getTweetId()));
+        } catch (Exception e) {
+            android.util.Log.w("PikoBookmarkFolders", "Unable to resolve removed bookmark", e);
+        }
+    }
+
+    static void removeTweetFromAllFolders(Context context, String id) {
+        if (id == null || id.isEmpty() || "null".equals(id)) return;
+        synchronized (LOCK) {
+            JSONArray folders = read(context);
+            boolean changed = false;
+            for (int i = 0; i < folders.length(); i++) {
+                JSONObject folder = folders.optJSONObject(i);
+                if (folder == null) continue;
+                JSONArray posts = folder.optJSONArray("posts");
+                if (posts == null) continue;
+                for (int j = posts.length() - 1; j >= 0; j--) {
+                    JSONObject post = posts.optJSONObject(j);
+                    if (post != null && id.equals(post.optString("id"))) {
+                        posts.remove(j);
+                        changed = true;
+                    }
+                }
+            }
+            if (changed) {
+                save(context, folders);
+                BookmarkNativeTimeline.removeTweetId(id);
+            }
         }
     }
 
