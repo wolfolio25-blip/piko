@@ -53,6 +53,7 @@ public final class BookmarkTabs {
             }
             @Override public void onActivityStarted(Activity a) {}
             @Override public void onActivityResumed(Activity a) {
+                BookmarkNativeTimeline.onAccountChanged(a);
                 if (BOOKMARK_ACTIVITY.equals(a.getClass().getName())) {
                     BookmarkNativeTimeline.setBookmarkScreenVisible(true);
                     a.getWindow().getDecorView().post(() -> attach(a));
@@ -113,7 +114,14 @@ public final class BookmarkTabs {
         // Only wrap the native Bookmarks content once per Activity instance.
         if (INSTALLED.containsKey(activity)) {
             BookmarkPage already = INSTALLED.get(activity);
-            if (already != null) already.shell.post(already::positionControls);
+            if (already != null) {
+                if (already.folderTimelineVisible
+                        && !BookmarkNativeTimeline.isFiltering()) {
+                    already.switchTo(false);
+                } else {
+                    already.shell.post(already::positionControls);
+                }
+            }
             return;
         }
         if (content.getChildCount() == 0) return;
@@ -178,6 +186,9 @@ public final class BookmarkTabs {
         final TextView folderHeaderTitle;
         private View adjustedList;
         private int listPaddingTop;
+        private int originalListTopMargin;
+        private int originalListBottomMargin;
+        private int lastListOffset = -1;
         private int lastTop = -1;
         private boolean positioning;
         private boolean folderTimelineVisible;
@@ -285,9 +296,31 @@ public final class BookmarkTabs {
                     int[] feedPos = new int[2];
                     feed.getLocationOnScreen(feedPos);
                     top = feedPos[1] - rootPos[1];
+                    // Subtract our own previous list offset; otherwise each
+                    // layout pass would push the tabs further down again.
+                    if (adjustedList == feed) {
+                        ViewGroup.LayoutParams existingParams = feed.getLayoutParams();
+                        if (existingParams instanceof ViewGroup.MarginLayoutParams) {
+                            top -= ((ViewGroup.MarginLayoutParams) existingParams).topMargin
+                                    - originalListTopMargin;
+                        } else {
+                            top -= Math.round(feed.getTranslationY());
+                        }
+                    }
                     if (adjustedList != feed) {
                         adjustedList = feed;
                         listPaddingTop = feed.getPaddingTop();
+                        lastListOffset = -1;
+                        ViewGroup.LayoutParams nativeParams = feed.getLayoutParams();
+                        if (nativeParams instanceof ViewGroup.MarginLayoutParams) {
+                            originalListTopMargin =
+                                    ((ViewGroup.MarginLayoutParams) nativeParams).topMargin;
+                            originalListBottomMargin =
+                                    ((ViewGroup.MarginLayoutParams) nativeParams).bottomMargin;
+                        } else {
+                            originalListTopMargin = 0;
+                            originalListBottomMargin = 0;
+                        }
                     }
                 }
                 if (top < dp(activity, 40) && heading != null && heading.getHeight() > 0) {
@@ -331,19 +364,42 @@ public final class BookmarkTabs {
             int[] rootPos = new int[2];
             adjustedList.getLocationOnScreen(listPos);
             shell.getLocationOnScreen(rootPos);
-            int lowerOverlay = lastTop + dp(activity, folderTimelineVisible ? 107 : 53);
-            int overlap = Math.max(0, lowerOverlay - (listPos[1] - rootPos[1]));
-            int requiredPadding = listPaddingTop + overlap;
-            if (adjustedList.getPaddingTop() != requiredPadding) {
-                adjustedList.setPadding(adjustedList.getPaddingLeft(), requiredPadding,
-                        adjustedList.getPaddingRight(), adjustedList.getPaddingBottom());
+
+            // Absolute content bounds: tabs and folder header occupy REAL space
+            // in the native list's layout. Padding alone leaves X's existing
+            // tweet rows painted above/under the overlaid tabs.
+            int overlayBottom = lastTop + dp(activity, folderTimelineVisible ? 107 : 53);
+            ViewGroup.LayoutParams rawParams = adjustedList.getLayoutParams();
+            if (rawParams instanceof ViewGroup.MarginLayoutParams) {
+                ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) rawParams;
+                int baselineTop = listPos[1] - rootPos[1]
+                        - (lp.topMargin - originalListTopMargin);
+                int needed = Math.max(0, overlayBottom - baselineTop);
+                if (lastListOffset != needed
+                        || lp.topMargin != originalListTopMargin + needed
+                        || lp.bottomMargin != originalListBottomMargin + needed) {
+                    lastListOffset = needed;
+                    lp.topMargin = originalListTopMargin + needed;
+                    lp.bottomMargin = originalListBottomMargin + needed;
+                    adjustedList.setLayoutParams(lp);
+                }
+                if (adjustedList.getPaddingTop() != listPaddingTop) {
+                    adjustedList.setPadding(adjustedList.getPaddingLeft(), listPaddingTop,
+                            adjustedList.getPaddingRight(), adjustedList.getPaddingBottom());
+                }
+                adjustedList.setClipBounds(null);
+            } else {
+                int baselineTop = listPos[1] - rootPos[1]
+                        - Math.round(adjustedList.getTranslationY());
+                int needed = Math.max(0, overlayBottom - baselineTop);
+                if (lastListOffset != needed) {
+                    lastListOffset = needed;
+                    adjustedList.setTranslationY(needed);
+                }
+                adjustedList.setClipBounds(new android.graphics.Rect(0, 0,
+                        adjustedList.getWidth(),
+                        Math.max(0, adjustedList.getHeight() - needed)));
             }
-            // Clip the native list itself to ensure scrolling tweets cannot
-            // bleed through the toolbar, tabs, or opened folder header.
-            android.graphics.Rect currentClip = adjustedList.getClipBounds();
-            android.graphics.Rect wanted =
-                    new android.graphics.Rect(0, overlap, adjustedList.getWidth(), adjustedList.getHeight());
-            if (!wanted.equals(currentClip)) adjustedList.setClipBounds(wanted);
         }
 
         private TextView findBookmarksTitle(View view, int depth) {
@@ -467,26 +523,22 @@ public final class BookmarkTabs {
             foldersView.removeAllViews();
             foldersView.addView(list, new ScrollView.LayoutParams(-1, -2));
 
-            // Per-account folders, with explicit switching when X has multiple accounts.
-            if (BookmarkAccountScope.count(activity) > 1) {
-                LinearLayout accountRow = ui.row();
-                accountRow.setPadding(ui.dp(16), ui.dp(4), ui.dp(16), ui.dp(4));
-                accountRow.setMinimumHeight(ui.dp(44));
-                accountRow.setBackground(ui.ripple());
-                accountRow.addView(ui.text(BookmarkAccountScope.label(activity), 14, true,
-                        secondary), new LinearLayout.LayoutParams(0, -2, 1f));
-                accountRow.addView(ui.icon(BookmarkChrome.MORE, secondary, 20),
-                        new LinearLayout.LayoutParams(ui.dp(20), ui.dp(20)));
-                accountRow.setOnClickListener(v -> BookmarkAccountScope.choose(
-                        activity, this::populateFolders));
-                list.addView(accountRow, new LinearLayout.LayoutParams(-1, ui.dp(44)));
-                list.addView(ui.divider());
-            }
+            // The folder owner follows X's current session automatically.
+            // Display its label for clarity; never ask users to switch folders
+            // manually when they switch their X account.
+            String activeLabel = BookmarkAccountScope.label(activity);
+            LinearLayout accountRow = ui.row();
+            accountRow.setPadding(ui.dp(16), ui.dp(4), ui.dp(16), ui.dp(4));
+            accountRow.setMinimumHeight(ui.dp(40));
+            accountRow.addView(ui.text(activeLabel, 14, true, secondary));
+            list.addView(accountRow, new LinearLayout.LayoutParams(-1, ui.dp(40)));
+            list.addView(ui.divider());
             if (BookmarkAccountScope.current(activity) == null) {
-                TextView empty = ui.text("Choose your X account to view its folders.",
+                TextView empty = ui.text(
+                        "X's current account is unavailable. Switch to your account in X and reopen Bookmarks.",
                         15, false, secondary);
                 empty.setGravity(Gravity.CENTER);
-                empty.setPadding(ui.dp(20), ui.dp(24), ui.dp(20), ui.dp(24));
+                empty.setPadding(ui.dp(16), ui.dp(20), ui.dp(16), ui.dp(20));
                 list.addView(empty);
                 return;
             }
@@ -599,14 +651,11 @@ public final class BookmarkTabs {
             JSONObject folder = folders.optJSONObject(folderIndex);
             if (folder == null) { populateFolders(); return; }
 
-            // A native timeline is the only tweet renderer for folder contents.
-            // Select saved IDs, then recreate X's Bookmarks Activity to load the
-            // same feed and adapter it uses for All Tweets.
-            BookmarkAccountScope.ensure(activity, () -> {
-                BookmarkNativeTimeline.selectFolder(
-                        activity, folder.optString("name", ""));
-                activity.recreate();
-            });
+            // Use the SAME pathway as Piko Settings > Bookmark folders,
+            // which opens a fresh native BookmarkActivity. Recreating the current
+            // Activity retained its old all-bookmarks adapter and leaked entries.
+            BookmarkAccountScope.ensure(activity, () ->
+                    BookmarkFolders.showFolder(activity, folderIndex));
         }
 
     }

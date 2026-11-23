@@ -145,12 +145,33 @@ final class BookmarkAccountScope {
 
     static int count(Context context) { return accounts(context).length; }
 
+    // Bookmarks always belong to the CURRENT X account. Never ask the user
+    // to choose an account merely because they clicked Bookmark.
+    private static String activeXAccount(Context context) {
+        Account[] entries = accounts(context);
+        if (entries.length == 1) return id(context, entries[0]);
+        if (entries.length == 0) return null;
+        String account = nativeSelectedAccount(context, entries);
+        if (account != null) return account;
+        return intentAccount(context, entries);
+    }
+
     static void ensure(Context context, Runnable ready) {
-        if (current(context) != null) {
+        ensureActive(context, ready, 0);
+    }
+
+    private static void ensureActive(Context context, Runnable ready, int attempt) {
+        if (activeXAccount(context) != null) {
             if (ready != null) ready.run();
             return;
         }
-        choose(context, ready);
+        if (attempt < 3) {
+            new android.os.Handler(android.os.Looper.getMainLooper())
+                    .postDelayed(() -> ensureActive(context, ready, attempt + 1), 180);
+            return;
+        }
+        BookmarkChrome.notice(context,
+                "X's active account could not be detected. Bookmark folders were left unchanged.");
     }
 
     static void choose(Context context, Runnable chosen) {

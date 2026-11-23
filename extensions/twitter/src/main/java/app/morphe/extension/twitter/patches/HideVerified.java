@@ -64,6 +64,24 @@ public final class HideVerified {
         }
     }
 
+    static boolean hasKnownVerifiedTargets() {
+        return !knownVerifiedIds.isEmpty() || !knownVerifiedHandles.isEmpty();
+    }
+
+    static boolean isKnownVerifiedHandle(String handle) {
+        if (handle == null || handle.isEmpty()) return false;
+        String normalized = handle.startsWith("@") ? handle.substring(1) : handle;
+        return knownVerifiedHandles.contains(normalized.toLowerCase(java.util.Locale.ROOT));
+    }
+
+    static boolean isKnownVerifiedUserId(String id) {
+        return id != null && knownVerifiedIds.contains(id);
+    }
+
+    static boolean isKnownUnfollowedVerifiedUserId(String id) {
+        return isKnownVerifiedUserId(id) && !followedVerifiedIds.contains(id);
+    }
+
     private static final Set<String> followedVerifiedIds =
             Collections.synchronizedSet(new HashSet<String>());
 
@@ -83,7 +101,8 @@ public final class HideVerified {
             if (!json.contains("\"home\"") && !json.contains("search_by_raw_query")
                     && !json.contains("search_by_keyword")
                     && !json.contains("\"is_blue_verified\"")
-                    && !json.contains("\"verified_type\"")) {
+                    && !json.contains("\"verified_type\"")
+                    && !json.contains("\"instructions\"")) {
                 return new ByteArrayInputStream(raw);
             }
             String filtered = filterJson(json);
@@ -101,9 +120,9 @@ public final class HideVerified {
             if (!(rootValue instanceof JSONObject)) return input;
             JSONObject root = (JSONObject) rootValue;
             JSONObject data = root.optJSONObject("data");
-            if (data == null) return input;
+            JSONObject scope = data == null ? root : data;
 
-            JSONObject home = data.optJSONObject("home");
+            JSONObject home = scope.optJSONObject("home");
             JSONObject target = null;
             Feed feed = null;
             if (home != null) {
@@ -120,14 +139,26 @@ public final class HideVerified {
                 }
             }
             if (feed == null) {
-                target = firstObject(data, "search_by_raw_query", "search_by_keyword");
+                target = firstObject(scope, "search_by_raw_query", "search_by_keyword");
                 if (target != null) feed = Feed.SEARCH;
             }
+            if (feed == null && HomeTabTracker.isHomeVisible()
+                    && !isProfileOrConversationPayload(scope)) {
+                // Newer X URT responses may omit data.home entirely. Only
+                // classify a generic timeline while the NATIVE home tabs are
+                // actually visible; this never runs on a profile or detail.
+                target = locateTimelineWithEntries(scope, 0);
+                if (target != null) {
+                    feed = HomeTabTracker.current() == HomeTabTracker.FOLLOWING
+                            ? Feed.FOLLOWING : Feed.FOR_YOU;
+                }
+            }
+
             // Learn verified IDs/handles on profile and tweet-detail views too,
             // but NEVER filter their responses. Thus a user may click through
             // and read the original post even if it was filtered from the home feed.
             if (feed == null || target == null) {
-                collectRelationships(data, new HashSet<>(), new HashSet<>());
+                collectRelationships(scope, new HashSet<>(), new HashSet<>());
                 return input;
             }
 
@@ -148,6 +179,51 @@ public final class HideVerified {
                 throw new IllegalStateException("Failed to filter timeline JSON", t);
             return input;
         }
+    }
+
+    /** X profile and conversation URTs can contain the same instructions. */
+    private static boolean isProfileOrConversationPayload(JSONObject root) {
+        if (root == null) return false;
+        for (String key : new String[]{
+                "user", "userByScreenName", "user_by_screen_name", "userByRestId",
+                "user_by_rest_id", "user_result", "userResult",
+                "tweetResult", "tweet_result", "tweetDetail", "tweet_detail",
+                "threaded_conversation_with_injections_v2",
+                "threaded_conversation_with_injections", "threaded_conversation",
+                "conversation", "tweet_by_rest_id", "tweetByRestId"
+        }) {
+            if (root.has(key)) return true;
+        }
+        return false;
+    }
+
+    private static JSONObject locateTimelineWithEntries(Object node, int depth) {
+        if (node == null || depth > 10) return null;
+        if (node instanceof JSONObject) {
+            JSONObject obj = (JSONObject) node;
+            JSONArray instructions = obj.optJSONArray("instructions");
+            if (instructions != null) {
+                for (int i = 0; i < instructions.length(); i++) {
+                    JSONObject instruction = instructions.optJSONObject(i);
+                    if (instruction == null) continue;
+                    if (instruction.optJSONArray("entries") != null
+                            || instruction.optJSONObject("entry") != null) return obj;
+                }
+            }
+            java.util.Iterator<String> keys = obj.keys();
+            while (keys.hasNext()) {
+                JSONObject candidate = locateTimelineWithEntries(
+                        obj.opt(keys.next()), depth + 1);
+                if (candidate != null) return candidate;
+            }
+        } else if (node instanceof JSONArray) {
+            JSONArray arr = (JSONArray) node;
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject candidate = locateTimelineWithEntries(arr.opt(i), depth + 1);
+                if (candidate != null) return candidate;
+            }
+        }
+        return null;
     }
 
     /** Learn which verified users the viewer currently follows. */

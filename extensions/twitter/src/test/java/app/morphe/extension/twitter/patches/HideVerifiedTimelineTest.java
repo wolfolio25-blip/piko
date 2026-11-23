@@ -13,6 +13,9 @@ public class HideVerifiedTimelineTest {
         Field selected = HomeTabTracker.class.getDeclaredField("selectedTab");
         selected.setAccessible(true);
         selected.setInt(null, value);
+        Field visible = HomeTabTracker.class.getDeclaredField("homeTabsVisible");
+        visible.setAccessible(true);
+        visible.setBoolean(null, value != 0);
     }
 
     private JSONObject entry(String id, JSONObject legacy) throws Exception {
@@ -56,6 +59,23 @@ public class HideVerifiedTimelineTest {
         String result = HideVerified.filterJson(json);
         assertFalse("Repost must be removed: " + result, result.contains("tweet-333"));
         assertTrue(result.contains("tweet-444"));
+    }
+
+    @Test public void unwrappedHomeTimelineRemovesQuoteOnlyWhenHomeVisible() throws Exception {
+        tab(1);
+        JSONObject wrappedTimeline = new JSONObject()
+                .put("instructions", new JSONArray().put(
+                        new JSONObject().put("entries", new JSONArray()
+                                .put(entry("111", new JSONObject().put("is_quote_status", true)))
+                                .put(entry("222", new JSONObject().put("full_text", "normal"))))));
+        String json = new JSONObject().put("timeline", wrappedTimeline).toString();
+        String home = HideVerified.filterJson(json);
+        assertFalse("Unwrapped home quote should be filtered: " + home,
+                home.contains("tweet-111"));
+        assertTrue(home.contains("tweet-222"));
+        tab(0);
+        assertEquals("Non-home view must preserve originals", json,
+                HideVerified.filterJson(json));
     }
 
     @Test public void profileTimelineIsNeverFiltered() throws Exception {

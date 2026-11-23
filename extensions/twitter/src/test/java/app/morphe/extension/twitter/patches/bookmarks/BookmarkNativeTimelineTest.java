@@ -44,6 +44,19 @@ public final class BookmarkNativeTimelineTest {
         assertFalse(BookmarkNativeTimeline.keepNativeEntryId("tweet-12345"));
     }
 
+    @Test public void drawerFoldersFilterVariantWithoutBookmarkRoot() throws Exception {
+        String json = "{\"data\":{\"timeline\":{\"instructions\":[{\"entries\":["
+                + "{\"entryId\":\"tweet-12345\",\"content\":{\"entryType\":\"TimelineTimelineItem\"}},"
+                + "{\"entryId\":\"tweet-99999\",\"content\":{\"entryType\":\"TimelineTimelineItem\"}},"
+                + "{\"entryId\":\"cursor-bottom-0\",\"content\":{\"entryType\":\"TimelineTimelineCursor\"}}"
+                + "]}]}}}";
+        String output = BookmarkNativeTimeline.filterBookmarksJson(
+                json, new HashSet<>(Collections.singletonList("12345")));
+        assertTrue("Allowed post missing: " + output, output.contains("tweet-12345"));
+        assertFalse("Unrelated tweet leaked: " + output, output.contains("tweet-99999"));
+        assertTrue("Pagination cursor lost", output.contains("cursor-bottom-0"));
+    }
+
     @Test public void generalBookmarkPageIsNeverFiltered() {
         BookmarkNativeTimeline.clearFolder();
         assertTrue(BookmarkNativeTimeline.keepNativeEntryId("tweet-99999"));
