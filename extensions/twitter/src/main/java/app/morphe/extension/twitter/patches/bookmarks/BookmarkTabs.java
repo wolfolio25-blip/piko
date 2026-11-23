@@ -279,7 +279,26 @@ public final class BookmarkTabs {
                     foldersTab.setTypeface(BookmarkChrome.typeface(true));
                 }
 
-                // Prefer measured native feed bounds over title or status-bar guesses.
+                // The native list can start BELOW an already-rendered tweet
+                // on some X builds. The real toolbar, not that list's first
+                // visible row, must anchor our tabs.
+                int toolbarBottom = -1;
+                if (heading != null) {
+                    View cursor = heading;
+                    for (int i = 0; i < 7 && cursor != null; i++) {
+                        int h = cursor.getHeight();
+                        if (h >= dp(activity, 44) && h <= dp(activity, 100)
+                                && cursor.getWidth() >= shell.getWidth() * 0.70f) {
+                            int[] p = new int[2];
+                            cursor.getLocationOnScreen(p);
+                            toolbarBottom = p[1] - rootPos[1] + h;
+                            break;
+                        }
+                        android.view.ViewParent parent = cursor.getParent();
+                        cursor = parent instanceof View ? (View) parent : null;
+                    }
+                }
+                PatchDiagnostics.value("bookmark_ui_toolbar_bottom_px", toolbarBottom);
                 View feed = findTweetList(originalView, 0, 0);
                 PatchDiagnostics.hit(feed == null ? "bookmark_ui_no_native_list"
                         : "bookmark_ui_native_list_found");
@@ -293,6 +312,14 @@ public final class BookmarkTabs {
                         adjustedList = feed;
                         listPaddingTop = feed.getPaddingTop();
                     }
+                }
+                // Never position the tabs below the original toolbar when
+                // a nested RecyclerView is accidentally chosen as the feed.
+                if (toolbarBottom >= dp(activity, 40)) {
+                    top = toolbarBottom;
+                    PatchDiagnostics.hit("bookmark_ui_toolbar_anchor_used");
+                } else {
+                    PatchDiagnostics.hit("bookmark_ui_toolbar_anchor_missing");
                 }
                 if (top < dp(activity, 40) && heading != null && heading.getHeight() > 0) {
                     int[] pos = new int[2];
