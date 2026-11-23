@@ -23,6 +23,7 @@ import android.widget.Toast;
 
 import app.morphe.extension.twitter.entity.Tweet;
 import app.morphe.extension.twitter.patches.HomeTabTracker;
+import app.morphe.extension.twitter.patches.PatchDiagnostics;
 
 import java.lang.reflect.Field;
 import java.util.Collections;
@@ -125,6 +126,7 @@ public final class BookmarkButtonObserver {
     private static void inspectViews(View view, int[] remaining, int depth) {
         if (view == null || depth > 30 || remaining[0]-- <= 0) return;
         if (isBookmarkControl(view)) {
+            PatchDiagnostics.hit("bookmark_inline_control_seen");
             View target = view;
             if (!target.isClickable()) {
                 ViewParent parent = target.getParent();
@@ -139,6 +141,7 @@ public final class BookmarkButtonObserver {
             // into a local folder without changing X's original tap action.
             if (target.isClickable() && !target.isLongClickable()) {
                 target.setOnLongClickListener(v -> {
+                    PatchDiagnostics.hit("bookmark_longpress");
                     Tweet tweet = findTweet(v);
                     if (tweet == null) return false;
                     Activity owner = findActivity(v.getContext());
@@ -198,6 +201,7 @@ public final class BookmarkButtonObserver {
             if (original == null) super.sendAccessibilityEvent(host, eventType);
             else original.sendAccessibilityEvent(host, eventType);
             if (eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+                PatchDiagnostics.hit("bookmark_accessibility_click");
                 final String labelBeforeClick = previousLabel;
                 CharSequence current = host.getContentDescription();
                 previousLabel = current == null ? "" : current.toString();
@@ -263,12 +267,15 @@ public final class BookmarkButtonObserver {
 
         Tweet tweet = tweetAtClick != null ? tweetAtClick : findTweet(clicked);
         if (tweet == null) {
+            PatchDiagnostics.hit("bookmark_click_model_missing");
             // Never save a guessed ID to the wrong folder.
             android.util.Log.w(TAG, "Couldn't resolve tweet model from inline bookmark control");
             return;
         }
+        PatchDiagnostics.hit("bookmark_click_model_found");
         try {
             if (removing) {
+                PatchDiagnostics.hit("bookmark_click_removal");
                 BookmarkFolders.onUnbookmark(activity, tweet);
                 return;
             }
@@ -277,6 +284,7 @@ public final class BookmarkButtonObserver {
             if (id.equals(lastTweetId) && now - lastClickTime < 1500) return;
             lastTweetId = id;
             lastClickTime = now;
+            PatchDiagnostics.hit("bookmark_click_saving");
             BookmarkFolders.saveTweet(activity, tweet);
         } catch (Exception exception) {
             android.util.Log.w(TAG, "Could not open folder picker", exception);

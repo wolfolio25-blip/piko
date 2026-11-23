@@ -12,6 +12,7 @@ package app.morphe.extension.twitter.patches.bookmarks;
 
 import android.content.Context;
 import android.util.Log;
+import app.morphe.extension.twitter.patches.PatchDiagnostics;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -43,12 +44,19 @@ public final class BookmarkNativeTimeline {
      */
     public static boolean keepNativeEntryId(String entryId) {
         Selection active = selected;
-        if (active == null || !bookmarkScreenVisible || entryId == null) return true;
+        PatchDiagnostics.hit("bookmark_model_parser_hook");
+        if (active == null || !bookmarkScreenVisible || entryId == null) {
+            PatchDiagnostics.hit("bookmark_model_inactive");
+            return true;
+        }
         // Never expose the unfiltered native bookmarks in a folder.
         if (entryId.startsWith("cursor-") || entryId.contains("cursor-top")
                 || entryId.contains("cursor-bottom")) return true;
         String id = idFromEntryId(entryId);
-        return !id.isEmpty() && active.ids.contains(id);
+        boolean keep = !id.isEmpty() && active.ids.contains(id);
+        PatchDiagnostics.hit(keep ? "bookmark_model_kept" : "bookmark_model_rejected");
+        if (id.isEmpty()) PatchDiagnostics.hit("bookmark_model_unknown_id");
+        return keep;
     }
 
     private static String idFromEntryId(String entryId) {
@@ -99,6 +107,8 @@ public final class BookmarkNativeTimeline {
             break;
         }
         selected = new Selection(folder, ids);
+        PatchDiagnostics.hit("bookmark_folder_selected");
+        PatchDiagnostics.value("bookmark_folder_saved_ids", ids.size());
         Log.i(TAG, "Selected folder for native timeline: " + folder + " (" + ids.size() + " ids)");
     }
 
@@ -126,7 +136,13 @@ public final class BookmarkNativeTimeline {
      */
     public static InputStream filter(InputStream in) {
         Selection active = selected;
-        if (in == null || active == null) return in;
+        if (in == null) return null;
+        PatchDiagnostics.hit("bookmark_stream_hook");
+        if (active == null) {
+            PatchDiagnostics.hit("bookmark_stream_inactive");
+            return in;
+        }
+        PatchDiagnostics.hit("bookmark_stream_selected");
 
         byte[] bytes;
         try {
@@ -139,11 +155,20 @@ public final class BookmarkNativeTimeline {
 
         try {
             String json = new String(bytes, StandardCharsets.UTF_8);
-            if (!isBookmarkResponse(json)) return new ByteArrayInputStream(bytes);
+            if (!isBookmarkResponse(json)) {
+                PatchDiagnostics.hit("bookmark_stream_wrong_schema");
+                return new ByteArrayInputStream(bytes);
+            }
+            PatchDiagnostics.hit("bookmark_stream_recognized");
             String rewritten = filterBookmarksJson(json, active.ids);
-            if (rewritten == null || rewritten.equals(json)) return new ByteArrayInputStream(bytes);
+            if (rewritten == null || rewritten.equals(json)) {
+                PatchDiagnostics.hit("bookmark_stream_unchanged");
+                return new ByteArrayInputStream(bytes);
+            }
+            PatchDiagnostics.hit("bookmark_stream_rewritten");
             return new ByteArrayInputStream(rewritten.getBytes(StandardCharsets.UTF_8));
         } catch (Throwable exception) {
+            PatchDiagnostics.hit("bookmark_stream_exception");
             Log.w(TAG, "Timeline filter failed; retaining original", exception);
             return new ByteArrayInputStream(bytes);
         }
@@ -179,15 +204,24 @@ public final class BookmarkNativeTimeline {
         try {
             JSONObject root = new JSONObject(new JSONTokener(json));
             JSONObject data = root.optJSONObject("data");
-            if (data == null) return json;
+            if (data == null) {
+                PatchDiagnostics.hit("bookmark_payload_missing_data");
+                return json;
+            }
             JSONObject bookmarks = first(data,
                     "bookmark_timeline_v2", "bookmark_timeline",
                     "bookmarks_timeline", "bookmark_timeline_urt");
-            if (bookmarks == null) return json;
+            if (bookmarks == null) {
+                PatchDiagnostics.hit("bookmark_payload_missing_root");
+                return json;
+            }
             JSONObject timeline = bookmarks.optJSONObject("timeline");
             if (timeline == null) timeline = bookmarks;
             JSONArray instructions = timeline.optJSONArray("instructions");
-            if (instructions == null) return json;
+            if (instructions == null) {
+                PatchDiagnostics.hit("bookmark_payload_missing_instructions");
+                return json;
+            }
 
             int removed = 0;
             for (int i = 0; i < instructions.length(); i++) {
@@ -204,6 +238,7 @@ public final class BookmarkNativeTimeline {
                 JSONArray addModuleItems = instruction.optJSONArray("moduleItems");
                 if (addModuleItems != null) removed += filterModuleItems(addModuleItems, allowed);
             }
+            PatchDiagnostics.value("bookmark_payload_removed_last", removed);
             if (removed == 0) return json;
             Log.i(TAG, "Filtered " + removed + " native bookmark timeline items");
             return root.toString();

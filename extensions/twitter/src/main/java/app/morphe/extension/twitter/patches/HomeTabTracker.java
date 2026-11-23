@@ -29,11 +29,17 @@ public final class HomeTabTracker {
         try {
             TextView[] tabs = new TextView[2];
             findTabs(root, tabs, 0, new int[]{500});
-            if (tabs[0] == null || tabs[1] == null) return;
+            if (tabs[0] == null || tabs[1] == null) {
+                PatchDiagnostics.hit("home_tab_labels_not_found");
+                return;
+            }
+            PatchDiagnostics.hit("home_tab_labels_found");
             boolean forYou = selected(tabs[0]);
             boolean following = selected(tabs[1]);
             if (forYou != following) {
                 selectedTab = following ? FOLLOWING : FOR_YOU;
+                PatchDiagnostics.hit("home_tab_selection_explicit");
+                PatchDiagnostics.value("home_tab_current", selectedTab);
                 return;
             }
             // X themes mark the selected tab with its stronger text contrast.
@@ -41,8 +47,11 @@ public final class HomeTabTracker {
                     root.getContext(), "coreColorAppBackground");
             double a = contrast(tabs[0].getCurrentTextColor(), bg);
             double b = contrast(tabs[1].getCurrentTextColor(), bg);
-            if (Math.abs(a - b) >= 25)
+            if (Math.abs(a - b) >= 25) {
                 selectedTab = a > b ? FOR_YOU : FOLLOWING;
+                PatchDiagnostics.hit("home_tab_selection_contrast");
+                PatchDiagnostics.value("home_tab_current", selectedTab);
+            } else PatchDiagnostics.hit("home_tab_selection_unknown");
         } catch (Throwable ignored) {}
     }
 

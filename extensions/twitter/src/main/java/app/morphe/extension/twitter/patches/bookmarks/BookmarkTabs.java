@@ -8,6 +8,7 @@
 package app.morphe.extension.twitter.patches.bookmarks;
 
 import android.app.Activity;
+import app.morphe.extension.twitter.patches.PatchDiagnostics;
 import android.app.Application;
 import android.os.Bundle;
 import android.content.Context;
@@ -278,22 +279,53 @@ public final class BookmarkTabs {
                     foldersTab.setTypeface(BookmarkChrome.typeface(true));
                 }
 
-                // Prefer measured native feed bounds over title or status-bar guesses.
+                // The native list can start BELOW an already-rendered tweet
+                // on some X builds. The real toolbar, not that list's first
+                // visible row, must anchor our tabs.
+                int toolbarBottom = -1;
+                if (heading != null) {
+                    View cursor = heading;
+                    for (int i = 0; i < 7 && cursor != null; i++) {
+                        int h = cursor.getHeight();
+                        if (h >= dp(activity, 44) && h <= dp(activity, 100)
+                                && cursor.getWidth() >= shell.getWidth() * 0.70f) {
+                            int[] p = new int[2];
+                            cursor.getLocationOnScreen(p);
+                            toolbarBottom = p[1] - rootPos[1] + h;
+                            break;
+                        }
+                        android.view.ViewParent parent = cursor.getParent();
+                        cursor = parent instanceof View ? (View) parent : null;
+                    }
+                }
+                PatchDiagnostics.value("bookmark_ui_toolbar_bottom_px", toolbarBottom);
                 View feed = findTweetList(originalView, 0, 0);
+                PatchDiagnostics.hit(feed == null ? "bookmark_ui_no_native_list"
+                        : "bookmark_ui_native_list_found");
                 int top = -1;
                 if (feed != null && feed.getHeight() > 0) {
                     int[] feedPos = new int[2];
                     feed.getLocationOnScreen(feedPos);
                     top = feedPos[1] - rootPos[1];
+                    PatchDiagnostics.value("bookmark_ui_native_feed_y", top);
                     if (adjustedList != feed) {
                         adjustedList = feed;
                         listPaddingTop = feed.getPaddingTop();
                     }
                 }
+                // Never position the tabs below the original toolbar when
+                // a nested RecyclerView is accidentally chosen as the feed.
+                if (toolbarBottom >= dp(activity, 40)) {
+                    top = toolbarBottom;
+                    PatchDiagnostics.hit("bookmark_ui_toolbar_anchor_used");
+                } else {
+                    PatchDiagnostics.hit("bookmark_ui_toolbar_anchor_missing");
+                }
                 if (top < dp(activity, 40) && heading != null && heading.getHeight() > 0) {
                     int[] pos = new int[2];
                     heading.getLocationOnScreen(pos);
                     top = pos[1] - rootPos[1] + heading.getHeight() + dp(activity, 8);
+                    PatchDiagnostics.value("bookmark_ui_heading_fallback_y", top);
                 }
                 if (top < dp(activity, 40)) {
                     // android.R.id.content already excludes the status bar on this
@@ -301,6 +333,8 @@ public final class BookmarkTabs {
                     top = dp(activity, 56);
                 }
                 top = Math.max(dp(activity, 40), Math.min(top, shell.getHeight() / 3));
+                PatchDiagnostics.value("bookmark_ui_tabs_top_px", top);
+                PatchDiagnostics.value("bookmark_ui_screen_height_px", shell.getHeight());
                 if (top != lastTop) {
                     lastTop = top;
                     FrameLayout.LayoutParams barParams =
@@ -326,13 +360,17 @@ public final class BookmarkTabs {
         }
 
         private void applyNativeListPadding() {
-            if (adjustedList == null || lastTop < 0 || adjustedList.getWidth() == 0) return;
+            if (adjustedList == null || lastTop < 0 || adjustedList.getWidth() == 0) {
+                PatchDiagnostics.hit("bookmark_ui_list_not_ready");
+                return;
+            }
             int[] listPos = new int[2];
             int[] rootPos = new int[2];
             adjustedList.getLocationOnScreen(listPos);
             shell.getLocationOnScreen(rootPos);
             int lowerOverlay = lastTop + dp(activity, folderTimelineVisible ? 107 : 53);
             int overlap = Math.max(0, lowerOverlay - (listPos[1] - rootPos[1]));
+            PatchDiagnostics.value("bookmark_ui_list_overlap_px", overlap);
             int requiredPadding = listPaddingTop + overlap;
             if (adjustedList.getPaddingTop() != requiredPadding) {
                 adjustedList.setPadding(adjustedList.getPaddingLeft(), requiredPadding,
